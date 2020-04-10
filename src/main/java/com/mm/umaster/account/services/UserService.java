@@ -5,6 +5,7 @@ import com.mm.umaster.account.models.RoleType;
 import com.mm.umaster.account.models.ShortUser;
 import com.mm.umaster.account.models.User;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -32,7 +33,7 @@ public class UserService implements UserDetailsService {
         newAccount.setName(user.getName());
         newAccount.setPassword(passwordEncoder.encode(user.getPassword()));
         newAccount.setEmail(user.getEmail());
-        newAccount.setRoles(Collections.singleton(RoleType.USER));
+        newAccount.setRoles(Collections.singleton(RoleType.ROLE_USER));
 
         return new ShortUser(userRepository.save(newAccount));
     }
@@ -45,6 +46,18 @@ public class UserService implements UserDetailsService {
             throw new UsernameNotFoundException("User " + email + " was not found");
         }
         return user;
+    }
+
+    public ShortUser changeRole(final RoleType roleType) throws UsernameNotFoundException {
+        String email = SecurityContextHolder.getContext().getAuthentication().getPrincipal().toString();
+        User user = userRepository.findByEmail(email);
+
+        if (user == null) {
+            throw new UsernameNotFoundException("User " + email + " was not found");
+        }
+
+        user.setRoles(Collections.singleton(roleType));
+        return new ShortUser(user);
     }
 
     public List<User> loadAllUsers() {

@@ -1,7 +1,6 @@
 package com.mm.umaster.security;
 
 import com.google.common.base.Strings;
-import com.mm.umaster.security.SecurityConstants;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
