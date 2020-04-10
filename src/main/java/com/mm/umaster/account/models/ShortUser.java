@@ -5,15 +5,15 @@ import java.util.Set;
 
 @Data
 public class ShortUser {
-    Long id;
-    String name;
-    String email;
-    Set<RoleType> roles;
+    private final Long id;
+    private final String name;
+    private final String email;
+    private final Set<RoleType> roles;
 
     public ShortUser(User user) {
-        this.id = user.id;
-        this.name = user.name;
-        this.email = user.email;
-        this.roles = user.roles;
+        this.id = user.getId();
+        this.name = user.getName();
+        this.email = user.getEmail();
+        this.roles = user.getRoles();
     }
 }

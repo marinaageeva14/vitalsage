@@ -14,7 +14,7 @@ import java.util.Collection;
 import java.util.Set;
 
 @Entity
-@Table(name="account")
+@Table(name = "account")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -22,26 +22,31 @@ public class User implements UserDetails {
     @Id
     @Column(unique = true, nullable = false)
     @GeneratedValue(strategy = GenerationType.AUTO)
-    Long id;
+    private Long id;
 
     @NotBlank(message = "Name is mandatory")
-    String name;
+    private String name;
 
     @NotBlank(message = "Email is mandatory")
     @Email(message = "Email format is incorrect")
-    String email;
-    String avatar;
-    String gender;
-    String locale;
+    private String email;
+
+    private String avatar;
+
+    private String gender;
+
+    private String locale;
+
     @NotBlank(message = "Password is mandatory")
-    String password;
-    LocalDateTime lastVisit;
+    private String password;
+
+    private LocalDateTime lastVisit;
 
     @ElementCollection(targetClass = RoleType.class, fetch = FetchType.EAGER)
-    @CollectionTable(name="account_role", joinColumns = @JoinColumn(name="account_id"))
+    @CollectionTable(name = "account_role", joinColumns = @JoinColumn(name = "account_id"))
     @Enumerated(EnumType.STRING)
-    Set<RoleType> roles;
-  //  Set<? extends GrantedAuthority> grantedAuthorities;
+    private Set<RoleType> roles;
+    //  Set<? extends GrantedAuthority> grantedAuthorities;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

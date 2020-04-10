@@ -10,8 +10,8 @@ public class LoginForm {
 
     @NotBlank(message = "Email is mandatory")
     @Email(message = "Email format is incorrect")
-    String email;
+    private String email;
 
     @NotBlank(message = "Password is mandatory")
-    String password;
+    private String password;
 }
