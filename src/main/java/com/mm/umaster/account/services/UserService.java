@@ -1,11 +1,9 @@
 package com.mm.umaster.account.services;
 
 import com.mm.umaster.account.error.UserAlreadyExistsException;
-import com.mm.umaster.account.models.Address;
-import com.mm.umaster.account.models.RoleType;
-import com.mm.umaster.account.models.ShortUser;
-import com.mm.umaster.account.models.User;
+import com.mm.umaster.account.models.*;
 import com.mm.umaster.account.repositories.AddressRepository;
+import com.mm.umaster.account.repositories.MasterRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -21,6 +19,9 @@ public class UserService implements UserDetailsService {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private MasterRepository masterRepository;
 
     @Autowired
     private AddressRepository addressRepository;
@@ -40,7 +41,7 @@ public class UserService implements UserDetailsService {
         newAccount.setPassword(passwordEncoder.encode(user.getPassword()));
         newAccount.setEmail(user.getEmail());
         newAccount.setAddress(address);
-        newAccount.setRoles(Collections.singleton(RoleType.USER));
+//        newAccount.setRoles(Collections.singleton(RoleType.USER));
 
         return userRepository.save(newAccount);
     }
@@ -55,7 +56,7 @@ public class UserService implements UserDetailsService {
         return user;
     }
 
-    public ShortUser changeRole(final RoleType roleType,
+    public User changeRole(final RoleType roleType,
                                 final String email) throws UsernameNotFoundException {
         User user = userRepository.findByEmail(email);
 
@@ -63,8 +64,19 @@ public class UserService implements UserDetailsService {
             throw new UsernameNotFoundException("User " + email + " was not found");
         }
 
-        user.setRoles(Collections.singleton(roleType));
-        return new ShortUser(user);
+    //    user.setRoles(Collections.singleton(roleType));
+        return user;
+    }
+
+    public Master becomeUser(Master master,
+                             final String email) {
+        User user = changeRole(RoleType.ROLE_MASTER, email);
+        Master newMaster = Master.builder()
+                .occupation(master.getOccupation())
+                .user(user)
+                .build();
+
+        return masterRepository.save(newMaster);
     }
 
     public List<User> loadAllUsers() {

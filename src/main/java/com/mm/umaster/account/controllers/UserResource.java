@@ -37,7 +37,7 @@ public class UserResource {
     }
 
     @PatchMapping("/change-role/{roleType}")
-    public ShortUser changeRole(@Valid @PathVariable RoleType roleType,
+    public User changeRole(@Valid @PathVariable RoleType roleType,
                                 Principal principal) {
         return userService.changeRole(roleType, principal.getName());
     }

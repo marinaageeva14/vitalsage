@@ -1,25 +1,29 @@
 package com.mm.umaster.account.models;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import javax.persistence.*;
+import javax.validation.constraints.NotBlank;
 
-@Entity
-@Table(name = "service")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class Service {
+@Entity
+@Builder
+@Table(name = "master")
+public class Master {
     @Id
     @Column(unique = true, nullable = false)
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
 
+    @OneToOne(cascade = CascadeType.ALL)
+    @JoinColumn(name = "user_id")
+    private User user;
 
-    @ManyToOne
-    private Master master;
-
-    private String name;
+    @NotBlank(message = "Master must have an occupation")
+    private String occupation;
 }

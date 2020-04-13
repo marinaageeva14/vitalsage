@@ -8,12 +8,12 @@ public class ShortUser {
     private final Long id;
     private final String name;
     private final String email;
-    private final Set<RoleType> roles;
+  //  private final Set<RoleType> roles;
 
     public ShortUser(User user) {
         this.id = user.getId();
         this.name = user.getName();
         this.email = user.getEmail();
-        this.roles = user.getRoles();
+     //   this.roles = user.getRoles();
     }
 }

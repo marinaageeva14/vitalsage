@@ -43,13 +43,10 @@ public class User implements UserDetails {
 
     private LocalDateTime lastVisit;
 
-
     @ElementCollection(targetClass = RoleType.class, fetch = FetchType.EAGER)
     @CollectionTable(name = "account_role", joinColumns = @JoinColumn(name = "account_id"))
     @Enumerated(EnumType.STRING)
     private Set<RoleType> roles;
-
-
 
     @OneToOne(cascade = CascadeType.ALL)
     @JoinColumn(name = "address_id")
