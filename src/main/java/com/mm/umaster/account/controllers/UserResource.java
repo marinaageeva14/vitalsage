@@ -11,6 +11,7 @@ import org.springframework.validation.Errors;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.security.Principal;
 import java.util.List;
 
 @RestController
@@ -21,7 +22,8 @@ public class UserResource {
     UserService userService;
 
     @PostMapping("/registration")
-    public ShortUser addUser(@Valid @RequestBody User user, Errors errors) {
+    public User addUser(@Valid @RequestBody User user,
+                        Errors errors) {
         if (errors.hasErrors()) {
             throw ApiErrors.buildErrors(errors);
         }
@@ -35,8 +37,9 @@ public class UserResource {
     }
 
     @PatchMapping("/change-role/{roleType}")
-    public ShortUser changeRole(@Valid @PathVariable RoleType roleType) {
-        return userService.changeRole(roleType);
+    public ShortUser changeRole(@Valid @PathVariable RoleType roleType,
+                                Principal principal) {
+        return userService.changeRole(roleType, principal.getName());
     }
 /*
     @PostMapping("/signin")

@@ -1,11 +1,12 @@
 package com.mm.umaster.account.services;
 
 import com.mm.umaster.account.error.UserAlreadyExistsException;
+import com.mm.umaster.account.models.Address;
 import com.mm.umaster.account.models.RoleType;
 import com.mm.umaster.account.models.ShortUser;
 import com.mm.umaster.account.models.User;
+import com.mm.umaster.account.repositories.AddressRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -22,20 +23,26 @@ public class UserService implements UserDetailsService {
     private UserRepository userRepository;
 
     @Autowired
+    private AddressRepository addressRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
-    public ShortUser createNewUserAccount(User user) {
+    public User createNewUserAccount(User user) {
         if (this.emailExists(user.getEmail())) {
             throw new UserAlreadyExistsException(("There is an account with that email address: " + user.getEmail()));
         }
+
+        Address address = addressRepository.save(user.getAddress());
 
         User newAccount = new User();
         newAccount.setName(user.getName());
         newAccount.setPassword(passwordEncoder.encode(user.getPassword()));
         newAccount.setEmail(user.getEmail());
-        newAccount.setRoles(Collections.singleton(RoleType.ROLE_USER));
+        newAccount.setAddress(address);
+        newAccount.setRoles(Collections.singleton(RoleType.USER));
 
-        return new ShortUser(userRepository.save(newAccount));
+        return userRepository.save(newAccount);
     }
 
     @Override
@@ -48,8 +55,8 @@ public class UserService implements UserDetailsService {
         return user;
     }
 
-    public ShortUser changeRole(final RoleType roleType) throws UsernameNotFoundException {
-        String email = SecurityContextHolder.getContext().getAuthentication().getPrincipal().toString();
+    public ShortUser changeRole(final RoleType roleType,
+                                final String email) throws UsernameNotFoundException {
         User user = userRepository.findByEmail(email);
 
         if (user == null) {
