@@ -1,6 +1,7 @@
 package com.mm.umaster.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mm.umaster.account.models.User;
 import io.jsonwebtoken.Jwts;
 ;
 import io.jsonwebtoken.security.Keys;
@@ -53,13 +54,15 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
                                             Authentication authResult) throws IOException, ServletException {
         SecretKey signingKey = Keys.hmacShaKeyFor(com.mm.umaster.security.SecurityConstants.SECRET_KEY.getBytes());
 
+        User user = (User) authResult.getPrincipal();
         String token = Jwts.builder()
                 .setSubject(authResult.getName())
+                .claim("id", user.getId())
+                .claim("authorities", authResult.getAuthorities())
                 .setIssuedAt(new Date())
                 .setExpiration(java.sql.Date.valueOf(LocalDate.now().plusWeeks(2)))
                 .signWith(signingKey)
                 .compact();
-
         response.addHeader(SecurityConstants.TOKEN_HEADER, com.mm.umaster.security.SecurityConstants.TOKEN_PREFIX + token);
 
     }

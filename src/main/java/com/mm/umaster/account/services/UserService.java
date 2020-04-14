@@ -73,6 +73,7 @@ public class UserService implements UserDetailsService {
         User user = changeRole(RoleType.ROLE_MASTER, email);
         Master newMaster = Master.builder()
                 .occupation(master.getOccupation())
+                .skills(master.getSkills())
                 .user(user)
                 .build();
 

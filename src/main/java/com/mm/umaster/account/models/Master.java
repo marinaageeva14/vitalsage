@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
+import java.util.Set;
 
 @Data
 @NoArgsConstructor
@@ -26,4 +27,8 @@ public class Master {
 
     @NotBlank(message = "Master must have an occupation")
     private String occupation;
+
+    @OneToMany(cascade = CascadeType.ALL)
+    @JoinColumn(name = "service_id")
+    private Set<Skill> skills;
 }

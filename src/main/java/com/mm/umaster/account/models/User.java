@@ -22,7 +22,7 @@ public class User implements UserDetails {
     @Id
     @Column(unique = true, nullable = false)
     @GeneratedValue(strategy = GenerationType.AUTO)
-    private Long id;
+    private long id;
 
     @NotBlank(message = "Name is mandatory")
     private String name;
