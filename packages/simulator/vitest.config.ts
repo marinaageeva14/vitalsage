@@ -6,13 +6,8 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   test: {
-    environment: 'jsdom',
-    globals: true,
-    coverage: {
-      provider: 'v8',
-      include:  ['src/**/*.ts'],
-      exclude:  ['src/index.ts'],
-    },
+    environment: 'node',
+    globals:     true,
   },
   resolve: {
     alias: {

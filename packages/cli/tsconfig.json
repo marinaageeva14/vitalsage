@@ -1,10 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib":    ["ES2020"],
+    "lib":    ["ES2020", "DOM"],
     "outDir": "dist",
     "paths": {
-      "@vitalsage/types": ["../types/src/index.ts"]
+      "@vitalsage/types":    ["../types/src/index.ts"],
+      "vitalsage-analysis":  ["../analysis/src/index.ts"],
+      "vitalsage-simulator": ["../simulator/src/index.ts"]
     }
   },
   "include": ["src"]

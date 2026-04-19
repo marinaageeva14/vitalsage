@@ -1,0 +1,85 @@
+import { XMLParser } from 'fast-xml-parser';
+import type { AgentName, MetricName, Suggestion, Severity, Effort } from '@vitalsage/types';
+import { generateSuggestionId } from '../utils/id.js';
+
+const VALID_SEVERITIES = new Set<Severity>(['critical', 'warning', 'info']);
+const VALID_EFFORTS    = new Set<Effort>(['low', 'medium', 'high']);
+const VALID_LANGS      = new Set<string>(['html', 'javascript', 'css', 'http', 'bash']);
+
+const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false });
+
+type RawSuggestion = Record<string, unknown>;
+
+export function parseAIResponse(
+  xml:    string,
+  agent:  AgentName,
+  metric: MetricName,
+): Suggestion[] {
+  let root: Record<string, unknown>;
+  try {
+    root = parser.parse(xml) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const suggestionsEl = root['suggestions'] as Record<string, unknown> | undefined;
+  if (!suggestionsEl) return [];
+
+  const raw = suggestionsEl['suggestion'];
+  if (!raw) return [];
+
+  // fast-xml-parser returns an array when multiple, object when single
+  const items: RawSuggestion[] = Array.isArray(raw) ? raw as RawSuggestion[] : [raw as RawSuggestion];
+
+  return items
+    .map((el): Suggestion | null => {
+      const title    = str(el, 'title');
+      const severity = str(el, 'severity') as Severity;
+      const effort   = str(el, 'effort') as Effort;
+      const lang     = str(el, 'codeLanguage');
+
+      if (!title)                          return null;
+      if (!VALID_SEVERITIES.has(severity)) return null;
+      if (!VALID_EFFORTS.has(effort))      return null;
+
+      const rawConf    = parseFloat(str(el, 'confidence') ?? '0.7');
+      const rawAffStr  = str(el, 'affectedPercent');
+      const rawAff     = rawAffStr !== undefined ? parseFloat(rawAffStr) : NaN;
+      const before     = str(el, 'beforeCode');
+      const after      = str(el, 'afterCode');
+
+      const confidence      = isFinite(rawConf) ? Math.min(1, Math.max(0, rawConf)) : 0.7;
+      const affectedPercent = isFinite(rawAff)  ? rawAff : undefined;
+
+      const codeExample =
+        before && after && lang && VALID_LANGS.has(lang)
+          ? { before, after, language: lang as 'html' | 'javascript' | 'css' | 'http' | 'bash' }
+          : undefined;
+
+      const learnMore = str(el, 'learnMore');
+
+      return {
+        id:              generateSuggestionId(agent, metric, title),
+        agent,
+        metric,
+        severity,
+        title,
+        detail:          str(el, 'detail') ?? '',
+        effort,
+        estimatedImpact: str(el, 'impact') ?? '',
+        confidence,
+        ...(affectedPercent !== undefined ? { affectedPercent } : {}),
+        ...(codeExample ? { codeExample } : {}),
+        ...(learnMore   ? { learnMore }   : {}),
+      };
+    })
+    .filter((s): s is Suggestion => s !== null)
+    .slice(0, 5);
+}
+
+function str(el: RawSuggestion, key: string): string | undefined {
+  const v = el[key];
+  if (v == null) return undefined;
+  const s = String(v).trim();
+  return s || undefined;
+}
