@@ -57,4 +57,5 @@ export interface SimulatorConfig {
   captureTrace?:      boolean;
   outputDir:          string;
   concurrency?:       number;
+  delayBetweenRuns?:  number;  // ms to wait between batch chunks
 }

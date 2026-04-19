@@ -18,7 +18,7 @@ export const INJECTOR_SCRIPT = `
       var entries = list.getEntries();
       var last = entries[entries.length - 1];
       if (last) {
-        var v = last.renderTime || last.loadTime;
+        var v = last.startTime;
         window.__vitalsage_session.metrics.LCP = { name:'LCP', value:v, rating:rateMetric('LCP',v), delta:v, id:'sim-lcp', navigationType:'navigate', entries:[] };
       }
     }).observe({ type:'largest-contentful-paint', buffered:true });
@@ -36,10 +36,12 @@ export const INJECTOR_SCRIPT = `
 
   try {
     new PerformanceObserver(function(list) {
-      var entry = list.getEntries()[0];
-      if (entry) {
-        var v = entry.startTime;
-        window.__vitalsage_session.metrics.FCP = { name:'FCP', value:v, rating:rateMetric('FCP',v), delta:v, id:'sim-fcp', navigationType:'navigate', entries:[] };
+      for (var entry of list.getEntries()) {
+        if (entry.name === 'first-contentful-paint') {
+          var v = entry.startTime;
+          window.__vitalsage_session.metrics.FCP = { name:'FCP', value:v, rating:rateMetric('FCP',v), delta:v, id:'sim-fcp', navigationType:'navigate', entries:[] };
+          break;
+        }
       }
     }).observe({ type:'paint', buffered:true });
   } catch(e) {}

@@ -96,7 +96,8 @@ Options (trace):
   --runs         Number of trace runs (default: 3)
   --network      Network profile: wifi 4g 3g slow-2g (default: 4g)
   --viewport     Viewport profile: desktop tablet mobile (default: desktop)
-  --output       Save report to file (.html or .json)
+  --delay        Ms to wait between runs (default: 2000)
+  --output       Save report to file (.html or .json); default: report-YYYY-MM-DD.html
   --ai-provider  AI provider: anthropic | openai | gemini
   --ai-key       API key for AI provider
   --ai-model     Model name override
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
       runs:     getNumber(args, 'runs', 3),
       network:  getString(args, 'network')  ?? '4g',
       viewport: getString(args, 'viewport') ?? 'desktop',
+      delay:    getNumber(args, 'delay', 2000),
       ...(aiProvider ? { aiProvider } : {}),
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),

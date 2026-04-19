@@ -42,7 +42,13 @@ export class PlaywrightSimulator {
     const errors:     Error[] = [];
     const plan        = buildRunPlan(config);
 
+    const delay = config.delayBetweenRuns ?? 0;
+
     for (let i = 0; i < plan.length; i += concurrency) {
+      if (i > 0 && delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+
       const chunk   = plan.slice(i, i + concurrency);
       const results = await Promise.allSettled(
         chunk.map(run => this.executeRun(browser, config, run))

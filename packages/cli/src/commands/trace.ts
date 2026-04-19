@@ -1,5 +1,5 @@
 import { writeFile }  from 'node:fs/promises';
-import type { TraceMetrics, NetworkProfile, ViewportProfile } from '@vitalsage/types';
+import type { TraceMetrics, NetworkProfile, ViewportProfile, SessionReport } from '@vitalsage/types';
 import { printSuccess, printError, printInfo } from '../output/terminal.js';
 
 const RESET  = '\x1b[0m';
@@ -23,6 +23,41 @@ function traceColor(value: number, warn: number, crit: number): string {
   if (value >= crit)  return RED;
   if (value >= warn)  return YELLOW;
   return GREEN;
+}
+
+function printCoreWebVitals(sessions: SessionReport[]): void {
+  if (sessions.length === 0) return;
+
+  const avg = (metric: string): number | undefined => {
+    const vals = sessions
+      .map(s => (s.metrics as Record<string, { value: number } | undefined>)[metric]?.value)
+      .filter((v): v is number => typeof v === 'number');
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
+  };
+
+  const lcp  = avg('LCP');
+  const fcp  = avg('FCP');
+  const cls  = avg('CLS');
+  const ttfb = avg('TTFB');
+  const inp  = avg('INP');
+
+  console.log('');
+  console.log(color('━'.repeat(50), DIM));
+  console.log(`  ${color('Core Web Vitals', BOLD)}  ${color(`(avg of ${sessions.length} run${sessions.length > 1 ? 's' : ''})`, DIM)}`);
+  console.log(color('━'.repeat(50), DIM));
+
+  function cwvLine(label: string, value: number | undefined, unit: string, good: number, poor: number): void {
+    if (value === undefined) { console.log(`  ${label.padEnd(22)}${color('no data', DIM)}`); return; }
+    const rounded = unit === 'cls' ? value.toFixed(3) : `${Math.round(value).toLocaleString()}ms`;
+    const c = value <= good ? GREEN : value <= poor ? YELLOW : RED;
+    console.log(`  ${label.padEnd(22)}${color(rounded.padStart(10), c)}`);
+  }
+
+  cwvLine('LCP',   lcp,  'ms',  2500, 4000);
+  cwvLine('FCP',   fcp,  'ms',  1800, 3000);
+  cwvLine('TTFB',  ttfb, 'ms',   800, 1800);
+  cwvLine('CLS',   cls,  'cls', 0.10, 0.25);
+  cwvLine('INP',   inp,  'ms',   200,  500);
 }
 
 function printTraceMetrics(tm: TraceMetrics): void {
@@ -80,14 +115,15 @@ function printTraceMetrics(tm: TraceMetrics): void {
 }
 
 export interface TraceArgs {
-  url:       string;
-  runs:      number;
-  network:   string;
-  viewport:  string;
-  output?:   string;
+  url:        string;
+  runs:       number;
+  network:    string;
+  viewport:   string;
+  output?:    string;
+  delay?:     number;
   aiProvider?: string;
-  aiKey?:    string;
-  aiModel?:  string;
+  aiKey?:     string;
+  aiModel?:   string;
 }
 
 export async function runTrace(args: TraceArgs): Promise<void> {
@@ -107,14 +143,16 @@ export async function runTrace(args: TraceArgs): Promise<void> {
   try {
     const simulator = new PlaywrightSimulator();
     sessions = await simulator.simulate({
-      url:          args.url,
-      runs:         args.runs,
-      outputDir:    '.vitalsage-trace-tmp',
-      concurrency:  1,
-      captureTrace: true,
-      networks:     [args.network as NetworkProfile],
-      viewports:    [args.viewport as ViewportProfile],
-      waitAfterLoad: 3000,
+      url:                args.url,
+      runs:               args.runs,
+      outputDir:          '.vitalsage-trace-tmp',
+      concurrency:        1,
+      captureTrace:       true,
+      networks:           [args.network as NetworkProfile],
+      viewports:          [args.viewport as ViewportProfile],
+      waitAfterLoad:      3000,
+      delayBetweenRuns:   args.delay ?? 2000,
+      interactAfterLoad:  false,  // no click → pointerdown never fires → LCP stays live for all candidates
     });
   } finally {
     console.log = origLog;
@@ -127,7 +165,8 @@ export async function runTrace(args: TraceArgs): Promise<void> {
 
   printSuccess(`Captured ${sessions.length} session(s)`);
 
-  // Show raw trace metrics from the representative session
+  printCoreWebVitals(sessions);
+
   const traceSession = sessions.find(s => s.page.traceMetrics);
   if (traceSession?.page.traceMetrics) {
     printTraceMetrics(traceSession.page.traceMetrics);
@@ -184,12 +223,12 @@ export async function runTrace(args: TraceArgs): Promise<void> {
     }
   }
 
-  if (args.output) {
-    const ext  = args.output.endsWith('.json') ? 'json' : 'html';
-    const data = ext === 'json' ? JSON.stringify(reports, null, 2) : generateHtmlReport(reports);
-    await writeFile(args.output, data, 'utf8');
-    printSuccess(`Report written to ${args.output}`);
-  }
+  const datestamp = new Date().toISOString().slice(0, 10);
+  const outPath   = args.output ?? `report-${datestamp}.html`;
+  const ext       = outPath.endsWith('.json') ? 'json' : 'html';
+  const data      = ext === 'json' ? JSON.stringify(reports, null, 2) : generateHtmlReport(reports);
+  await writeFile(outPath, data, 'utf8');
+  printSuccess(`Report written to ${outPath}`);
 
   console.log('');
 }
