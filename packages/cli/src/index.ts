@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { runSimulate } from './commands/simulate.js';
 import { runAnalyze }  from './commands/analyze.js';
 import { runReport }   from './commands/report.js';
