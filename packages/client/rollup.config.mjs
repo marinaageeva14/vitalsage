@@ -1,11 +1,11 @@
 import typescript from '@rollup/plugin-typescript';
 import resolve    from '@rollup/plugin-node-resolve';
 import replace    from '@rollup/plugin-replace';
-import terser from '@rollup/plugin-terser';
+import terser     from '@rollup/plugin-terser';
 import { createRequire } from 'module';
+
 const _require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-const pkg: { version: string } = _require('./package.json');
+const pkg = _require('./package.json');
 
 const replaceTokens = replace({
   '__VERSION__': pkg.version,
@@ -23,7 +23,7 @@ export default [
       format:    'esm',
       sourcemap: true,
     },
-    plugins: [resolve(), replaceTokens, typescript({ tsconfig: './tsconfig.json', declaration: false })],
+    plugins: [resolve(), replaceTokens, typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false, outDir: undefined })],
   },
 
   // CJS — peers external
@@ -35,18 +35,20 @@ export default [
       format:    'cjs',
       sourcemap: true,
     },
-    plugins: [resolve(), replaceTokens, typescript({ tsconfig: './tsconfig.json', declaration: false })],
+    plugins: [resolve(), replaceTokens, typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false, outDir: undefined })],
   },
 
-  // IIFE — bundles web-vitals, minified, no external deps
+  // IIFE — web-vitals external, minified
   {
     input: 'src/index.ts',
+    external: ['web-vitals', '@vitalsage/types'],
     output: {
       file:    'dist/vitalsage.iife.js',
       format:  'iife',
       name:    'VitalSage',
+      globals: { 'web-vitals': 'webVitals' },
       plugins: [terser()],
     },
-    plugins: [resolve({ browser: true }), replaceTokens, typescript({ tsconfig: './tsconfig.json', declaration: false })],
+    plugins: [resolve({ browser: true }), replaceTokens, typescript({ tsconfig: './tsconfig.json', declaration: false, declarationMap: false, outDir: undefined })],
   },
 ];

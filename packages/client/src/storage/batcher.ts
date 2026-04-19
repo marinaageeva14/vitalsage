@@ -7,7 +7,7 @@ export class MetricBatcher {
   private onFlush: (metrics: MetricDataPoint[]) => void;
 
   constructor(config: BatchingConfig, onFlush: (metrics: MetricDataPoint[]) => void) {
-    this.cfg = { maxSize: 10, flushInterval: 5000, enabled: true, ...config };
+    this.cfg = { maxSize: 10, flushInterval: 5000, ...config };
     this.onFlush = onFlush;
   }
 

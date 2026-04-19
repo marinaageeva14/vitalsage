@@ -7,7 +7,9 @@
       "Bash(npx pnpm@9 typecheck)",
       "Bash(npx vitest *)",
       "Bash(npx tsc *)",
-      "Bash(pnpm typecheck *)"
+      "Bash(pnpm typecheck *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(pnpm build *)"
     ]
   }
 }
