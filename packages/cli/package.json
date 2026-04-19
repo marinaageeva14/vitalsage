@@ -6,17 +6,19 @@
   "bin": {
     "vitalsage": "./dist/index.cjs"
   },
-  "main":  "./dist/index.cjs",
+  "main": "./dist/index.cjs",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
       "require": "./dist/index.cjs",
-      "types":   "./dist/types/index.d.ts"
+      "types": "./dist/types/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build":     "tsc --project tsconfig.json",
+    "build":     "tsup",
     "typecheck": "tsc --noEmit",
     "test":      "vitest run",
     "lint":      "eslint src --ext .ts",
@@ -25,10 +27,13 @@
   "dependencies": {
     "@vitalsage/types":    "workspace:*",
     "vitalsage-analysis":  "workspace:*",
-    "vitalsage-simulator": "workspace:*"
+    "vitalsage-simulator": "workspace:*",
+    "playwright":         "^1.44.0",
+    "fast-xml-parser":    "^4.3.6"
   },
   "devDependencies": {
-    "vitest":      "^1.6.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "tsup":        "^8.5.1",
+    "vitest":      "^1.6.0"
   }
 }
