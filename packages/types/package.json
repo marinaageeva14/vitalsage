@@ -1,0 +1,19 @@
+{
+  "name": "@vitalsage/types",
+  "version": "0.1.0",
+  "description": "Shared TypeScript types for VitalSage — zero runtime",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build":     "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint":      "eslint src --ext .ts",
+    "clean":     "rm -rf dist"
+  }
+}

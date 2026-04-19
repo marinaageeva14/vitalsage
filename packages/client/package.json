@@ -1,0 +1,49 @@
+{
+  "name": "vitalsage",
+  "version": "0.1.0",
+  "description": "AI-assisted web performance optimization — collection SDK",
+  "type": "module",
+  "main":    "./dist/vitalsage.cjs",
+  "module":  "./dist/vitalsage.js",
+  "browser": "./dist/vitalsage.iife.js",
+  "types":   "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import":  "./dist/vitalsage.js",
+      "require": "./dist/vitalsage.cjs",
+      "types":   "./dist/types/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build":     "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript && tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test":      "vitest run --coverage",
+    "lint":      "eslint src --ext .ts",
+    "clean":     "rm -rf dist",
+    "size":      "size-limit"
+  },
+  "peerDependencies": {
+    "web-vitals": ">=3.0.0"
+  },
+  "devDependencies": {
+    "web-vitals":                 "^4.2.4",
+    "@vitalsage/types":            "workspace:*",
+    "rollup":                     "^4.0.0",
+    "@rollup/plugin-typescript":  "^11.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-replace":     "^5.0.0",
+    "@rollup/plugin-commonjs":    "^25.0.0",
+    "@rollup/plugin-terser":      "^0.4.0",
+    "@size-limit/preset-small-lib": "^11.0.0",
+    "size-limit":                 "^11.0.0",
+    "vitest":                     "^1.6.0",
+    "@vitest/coverage-v8":        "^1.6.0",
+    "jsdom":                      "^24.0.0",
+    "@types/node":                "^20.0.0"
+  },
+  "size-limit": [
+    { "path": "./dist/vitalsage.iife.js", "limit": "6 kB" }
+  ]
+}
