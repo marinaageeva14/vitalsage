@@ -34,6 +34,7 @@ export interface PageContext {
   stylesheets:      StylesheetEntry[];
   navigationTiming: NavigationTimingSnapshot;
   traceMetrics?:    import('./trace.js').TraceMetrics;
+  screenshot?:      string;  // base64 JPEG, only present on captureTrace runs
 }
 
 export interface NavigationTimingSnapshot {

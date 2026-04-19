@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page, CDPSession } from 'playwright';
 import type {
   SessionReport,
   PageContext,
@@ -32,6 +32,8 @@ export async function extractSessionReport(
   viewportProfile: ViewportProfile,
   sessionId:       string,
   captureTrace     = false,
+  cdpSession?:     CDPSession,
+  screenshot?:     string,
 ): Promise<SessionReport> {
   await page.waitForTimeout(500);
 
@@ -57,8 +59,12 @@ export async function extractSessionReport(
 
   const viewport     = VIEWPORT_PROFILES[viewportProfile];
   const visitId      = generateId();
-  const traceMetrics = captureTrace ? await collectTraceMetrics(page) : undefined;
-  const finalPage    = traceMetrics ? { ...pageContext, traceMetrics } : pageContext;
+  const traceMetrics = captureTrace ? await collectTraceMetrics(page, cdpSession) : undefined;
+  const extras = {
+    ...(traceMetrics ? { traceMetrics } : {}),
+    ...(screenshot   ? { screenshot }   : {}),
+  };
+  const finalPage = Object.keys(extras).length ? { ...pageContext, ...extras } : pageContext;
 
   return {
     sessionId,

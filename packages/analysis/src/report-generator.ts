@@ -1,4 +1,5 @@
 import type { AnalysisReport, Suggestion, MetricName } from '@vitalsage/types';
+import type { TraceMetrics } from '@vitalsage/types';
 
 const SEVERITY_COLOR: Record<string, string> = {
   critical: '#ef4444',
@@ -49,6 +50,28 @@ export function generateHtmlReport(reports: AnalysisReport[]): string {
   .learn-more:hover { text-decoration: underline; }
   .insufficient { color: #64748b; font-style: italic; font-size: 0.85rem; }
   footer { margin-top: 32px; color: #4b5563; font-size: 0.75rem; text-align: center; }
+
+  /* screenshot */
+  .trace-layout { display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .screenshot-wrap { flex: 0 0 auto; }
+  .page-screenshot { width: 320px; max-width: 100%; border-radius: 6px; border: 1px solid #2d3748; display: block; }
+
+  /* trace metrics panel */
+  .trace-panel { flex: 1 1 300px; background: #0f1117; border: 1px solid #2d3748; border-radius: 6px; padding: 14px; }
+  .trace-panel-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 12px; }
+  .trace-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.8rem; }
+  .trace-bar-label { width: 80px; color: #94a3b8; flex-shrink: 0; }
+  .trace-bar-track { flex: 1; background: #1e2130; border-radius: 3px; height: 8px; overflow: hidden; }
+  .trace-bar-fill { height: 100%; border-radius: 3px; }
+  .trace-bar-value { width: 70px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .trace-kv { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 3px 0; border-bottom: 1px solid #1e2130; }
+  .trace-kv:last-child { border-bottom: none; }
+  .trace-kv-label { color: #94a3b8; }
+  .trace-kv-value { font-variant-numeric: tabular-nums; }
+  .good   { color: #22c55e; }
+  .warn   { color: #f59e0b; }
+  .crit   { color: #ef4444; }
+  .dim    { color: #64748b; }
 </style>
 </head>
 <body>
@@ -68,15 +91,77 @@ function renderRoute(report: AnalysisReport): string {
   const from    = new Date(report.timeWindow.from).toLocaleDateString();
   const to      = new Date(report.timeWindow.to).toLocaleDateString();
 
+  const traceLayout = (report.screenshot || report.traceMetrics)
+    ? `<div class="trace-layout">
+        ${report.screenshot ? renderScreenshot(report.screenshot) : ''}
+        ${report.traceMetrics ? renderTracePanel(report.traceMetrics) : ''}
+      </div>`
+    : '';
+
   return `<div class="route-block">
   <div class="route-title">${escHtml(pattern)}</div>
   <div class="route-meta">${report.sampleSize} sessions · confidence: ${conf} · ${from} – ${to}</div>
+  ${traceLayout}
   ${renderDistributions(report)}
   <h3>Suggestions (${report.suggestions.length})</h3>
   <div class="suggestions">
     ${report.suggestions.map(renderSuggestion).join('\n    ')}
   </div>
 </div>`;
+}
+
+function renderScreenshot(b64: string): string {
+  return `<div class="screenshot-wrap">
+    <img src="data:image/jpeg;base64,${b64}" class="page-screenshot" alt="Page screenshot" />
+  </div>`;
+}
+
+function renderTracePanel(tm: TraceMetrics): string {
+  const total = Math.max(tm.mainThreadWork, 1);
+
+  function barColor(v: number, warn: number, crit: number): string {
+    if (v >= crit) return '#ef4444';
+    if (v >= warn) return '#f59e0b';
+    return '#22c55e';
+  }
+  function valClass(v: number, warn: number, crit: number): string {
+    if (v >= crit) return 'crit';
+    if (v >= warn) return 'warn';
+    return 'good';
+  }
+  function bar(label: string, ms: number, warn: number, crit: number): string {
+    const pct   = Math.min(ms / total, 1) * 100;
+    const color = barColor(ms, warn, crit);
+    const cls   = valClass(ms, warn, crit);
+    return `<div class="trace-bar-row">
+      <span class="trace-bar-label">${label}</span>
+      <div class="trace-bar-track"><div class="trace-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+      <span class="trace-bar-value ${cls}">${Math.round(ms).toLocaleString()}ms</span>
+    </div>`;
+  }
+  function kv(label: string, value: string, cls = 'dim'): string {
+    return `<div class="trace-kv"><span class="trace-kv-label">${label}</span><span class="trace-kv-value ${cls}">${value}</span></div>`;
+  }
+
+  const tbtCls   = valClass(tm.totalBlockingTime, 300, 600);
+  const layoutCls = valClass(tm.layoutCount, 15, 30);
+  const recalcCls = valClass(tm.styleRecalcCount, 50, 100);
+  const heapCls   = tm.jsHeapUsed !== undefined ? (tm.jsHeapUsed >= 100 ? 'warn' : 'good') : 'dim';
+
+  return `<div class="trace-panel">
+    <div class="trace-panel-title">Main Thread Breakdown</div>
+    ${bar('Scripting',  tm.scriptingTime,  500,  1500)}
+    ${bar('Rendering',  tm.renderingTime,  200,  800)}
+    ${bar('Painting',   tm.paintingTime,   100,  400)}
+    <div style="margin-top:12px">
+      ${kv('Total Blocking Time', `${Math.round(tm.totalBlockingTime).toLocaleString()}ms · ${tm.longTaskCount} task(s)`, tbtCls)}
+      ${kv('Forced Layouts',  String(tm.layoutCount),    layoutCls)}
+      ${kv('Style Recalcs',   String(tm.styleRecalcCount), recalcCls)}
+      ${kv('DOM Nodes',       String(tm.domNodes))}
+      ${kv('JS Listeners',    String(tm.jsListeners))}
+      ${tm.jsHeapUsed !== undefined ? kv('JS Heap', `${tm.jsHeapUsed}MB`, heapCls) : ''}
+    </div>
+  </div>`;
 }
 
 function renderDistributions(report: AnalysisReport): string {

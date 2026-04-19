@@ -36,6 +36,8 @@ export interface AnalysisReport {
   distributions:   Partial<Record<MetricName, MetricDistribution>>;
   suggestions:     Suggestion[];
   analysisVersion: string;
+  screenshot?:     string;
+  traceMetrics?:   import('./trace.js').TraceMetrics;
 }
 
 export interface AgentContext {

@@ -122,7 +122,9 @@ export class AnalysisEngine {
       );
     });
 
-    const latest = sessions[0]!;
+    const latest       = sessions[0]!;
+    const screenshot   = sessions.find(s => s.page.screenshot)?.page.screenshot;
+    const traceMetrics = sessions.find(s => s.page.traceMetrics)?.page.traceMetrics;
 
     return {
       analysisId:      generateId(),
@@ -139,6 +141,8 @@ export class AnalysisEngine {
       distributions,
       suggestions:     rankAndDeduplicate(allSuggestions),
       analysisVersion: '__VERSION__',
+      ...(screenshot   ? { screenshot }   : {}),
+      ...(traceMetrics ? { traceMetrics } : {}),
     };
   }
 

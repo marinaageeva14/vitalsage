@@ -1,31 +1,49 @@
-import type { Page } from 'playwright';
+import type { Page, CDPSession } from 'playwright';
 import type { TraceMetrics, LongTask } from '@vitalsage/types';
 
-interface PlaywrightMetrics {
-  TaskDuration:         number;
-  ScriptDuration:       number;
-  RecalcStyleDuration:  number;
-  LayoutDuration:       number;
-  PaintDuration:        number;
-  LayoutCount:          number;
-  RecalcStyleCount:     number;
-  Nodes:                number;
-  JSEventListeners:     number;
-  JSHeapUsedSize?:      number;
-  [key: string]:        number | undefined;
+interface CDPMetric { name: string; value: number }
+
+interface PageMetrics {
+  TaskDuration:        number;
+  ScriptDuration:      number;
+  RecalcStyleDuration: number;
+  LayoutDuration:      number;
+  PaintDuration:       number;
+  LayoutCount:         number;
+  RecalcStyleCount:    number;
+  Nodes:               number;
+  JSEventListeners:    number;
+  JSHeapUsedSize?:     number;
+  [key: string]:       number | undefined;
 }
 
-type PageWithMetrics = { metrics(): Promise<PlaywrightMetrics> };
+// cdpSession must have had Performance.enable called BEFORE page.goto() —
+// if omitted a fresh session is created (metrics will only reflect post-call activity).
+export async function collectTraceMetrics(page: Page, cdpSession?: CDPSession): Promise<TraceMetrics> {
+  let client: CDPSession;
+  let owned = false;
 
-export async function collectTraceMetrics(page: Page): Promise<TraceMetrics> {
-  const [pageMetrics, rawLongTasks] = await Promise.all([
-    (page as unknown as PageWithMetrics).metrics(),
-    page.evaluate(() => {
-      type LongTaskEntry = { startTime: number; duration: number; blocking: number };
-      const s = (window as unknown as { __vitalsage_session?: { longTasks?: LongTaskEntry[] } }).__vitalsage_session;
-      return s?.longTasks ?? ([] as LongTaskEntry[]);
-    }),
-  ]);
+  if (cdpSession) {
+    client = cdpSession;
+  } else {
+    client = await page.context().newCDPSession(page);
+    await client.send('Performance.enable');
+    owned = true;
+  }
+
+  let pageMetrics: PageMetrics;
+  try {
+    const { metrics } = await client.send('Performance.getMetrics') as { metrics: CDPMetric[] };
+    pageMetrics = Object.fromEntries(metrics.map(m => [m.name, m.value])) as unknown as PageMetrics;
+  } finally {
+    if (owned) await client.detach().catch(() => {});
+  }
+
+  const rawLongTasks = await page.evaluate(() => {
+    type LongTaskEntry = { startTime: number; duration: number; blocking: number };
+    const s = (window as unknown as { __vitalsage_session?: { longTasks?: LongTaskEntry[] } }).__vitalsage_session;
+    return s?.longTasks ?? ([] as LongTaskEntry[]);
+  });
 
   const longTasks: LongTask[] = (rawLongTasks as Array<{ startTime: number; duration: number; blocking: number }>)
     .map(t => ({ startTime: t.startTime, duration: t.duration, blocking: t.blocking }))

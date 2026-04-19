@@ -16,7 +16,10 @@
       "Bash(pnpm --filter vitalsage-cli exec tsc --noEmit)",
       "Bash(pnpm -r exec tsc --noEmit)",
       "Bash(pnpm -r test --reporter=verbose)",
-      "Bash(pnpm --filter vitalsage-cli build)"
+      "Bash(pnpm --filter vitalsage-cli build)",
+      "Bash(pnpm --filter vitalsage-simulator typecheck)",
+      "Bash(pnpm --filter @vitalsage/types typecheck)",
+      "Bash(pnpm --filter vitalsage-analysis typecheck)"
     ]
   }
 }

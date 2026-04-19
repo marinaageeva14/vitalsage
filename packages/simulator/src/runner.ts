@@ -1,4 +1,4 @@
-import { chromium, type Browser } from 'playwright';
+import { chromium, type Browser, type CDPSession } from 'playwright';
 import { mkdir, writeFile }       from 'node:fs/promises';
 import { join }                   from 'node:path';
 import type { SimulatorConfig, SessionReport, NetworkProfile, ViewportProfile } from '@vitalsage/types';
@@ -91,8 +91,14 @@ export class PlaywrightSimulator {
     await tempPage.close();
 
     const page = await context.newPage();
+    let perfCdp: CDPSession | undefined;
     try {
       await page.addInitScript({ content: INJECTOR_SCRIPT });
+
+      if (config.captureTrace) {
+        perfCdp = await context.newCDPSession(page);
+        await perfCdp.send('Performance.enable');
+      }
 
       const url = run.route === '/'
         ? config.url
@@ -113,11 +119,21 @@ export class PlaywrightSimulator {
         }
       }
 
-      return await extractSessionReport(page, url, run.network, run.viewport, generateId(), config.captureTrace ?? false);
+      let screenshot: string | undefined;
+      if (config.captureTrace) {
+        const buf = await page.screenshot({ type: 'jpeg', quality: 80 });
+        screenshot = buf.toString('base64');
+      }
+
+      return await extractSessionReport(
+        page, url, run.network, run.viewport, generateId(),
+        config.captureTrace ?? false, perfCdp, screenshot,
+      );
     } catch (err) {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);
       return null;
     } finally {
+      await perfCdp?.detach().catch(() => {});
       await context.close().catch(() => {});
     }
   }
