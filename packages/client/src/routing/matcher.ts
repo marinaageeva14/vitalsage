@@ -10,11 +10,15 @@ import type { RouteConfig } from '@vitalsage/types';
 export function compilePattern(pattern: string): (path: string) => boolean {
   const normalised = normaliseTrailingSlash(pattern);
 
+  // Use placeholders so * expansion doesn't corrupt the ** replacement strings
   const regexStr = normalised
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&') // escape regex special chars (not * or :)
-    .replace(/\*\*/g, '(.+)?')             // ** = any depth, including zero
-    .replace(/\*/g,   '([^/]+)')           // *  = one segment (no slashes)
-    .replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '([^/]+)'); // :param = one segment
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')           // escape regex special chars
+    .replace(/\/\*\*/g, '\x00DEEPSLASH\x00')         // /** → placeholder
+    .replace(/\*\*/g,   '\x00DEEP\x00')              // ** alone → placeholder
+    .replace(/\*/g,     '[^/]+')                     // * = one segment
+    .replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '[^/]+') // :param = one segment
+    .replace(/\x00DEEPSLASH\x00/g, '(?:/.*)?')       // restore /** → optional /anything
+    .replace(/\x00DEEP\x00/g,      '.*');             // restore ** → anything
 
   const re = new RegExp(`^${regexStr}$`);
   return (path: string) => re.test(normaliseTrailingSlash(path));

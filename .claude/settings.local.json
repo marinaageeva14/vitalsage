@@ -6,7 +6,8 @@
       "Bash(npx pnpm@9 install)",
       "Bash(npx pnpm@9 typecheck)",
       "Bash(npx vitest *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(pnpm typecheck *)"
     ]
   }
 }
