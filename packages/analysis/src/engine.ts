@@ -25,6 +25,7 @@ import { RenderBlockAgent }  from './agents/render-block.js';
 import { ResourceHintAgent } from './agents/resource-hint.js';
 import { ImageAgent }        from './agents/image.js';
 import { FontAgent }         from './agents/font.js';
+import { TraceAgent }        from './agents/trace.js';
 
 const ALL_AGENTS: BaseAgent[] = [
   new LCPAgent(),
@@ -35,6 +36,7 @@ const ALL_AGENTS: BaseAgent[] = [
   new ResourceHintAgent(),
   new ImageAgent(),
   new FontAgent(),
+  new TraceAgent(),
 ];
 
 function mergeThresholds(partial?: Partial<ThresholdConfig>): ThresholdConfig {

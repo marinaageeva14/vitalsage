@@ -11,4 +11,6 @@ export { resolveProvider }           from './ai/client.js';
 export { parseAIResponse }           from './ai/parser.js';
 export { buildAgentUserPrompt, AI_SYSTEM_PROMPT } from './ai/prompts.js';
 
+export { TraceAgent } from './agents/trace.js';
+
 export type { AnalysisReport, AnalysisOptions, AgentContext } from '@vitalsage/types';

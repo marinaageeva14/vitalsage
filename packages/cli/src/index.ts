@@ -2,6 +2,7 @@
 import { runSimulate } from './commands/simulate.js';
 import { runAnalyze }  from './commands/analyze.js';
 import { runReport }   from './commands/report.js';
+import { runTrace }    from './commands/trace.js';
 import { printError }  from './output/terminal.js';
 
 function parseArgs(argv: string[]): Map<string, string | string[] | boolean> {
@@ -59,11 +60,13 @@ Usage:
   vitalsage simulate --url <url> [options]
   vitalsage analyze  --sessions <dir> [options]
   vitalsage report   --input <file> --output <file>
+  vitalsage trace    --url <url> [options]
 
 Commands:
   simulate    Run synthetic sessions using Playwright
   analyze     Analyze sessions and generate suggestions
   report      Generate HTML report from saved analysis JSON
+  trace       Capture and analyze a performance trace on-demand
 
 Options (simulate):
   --url         URL to simulate (required)
@@ -88,6 +91,16 @@ Options (analyze):
 Options (report):
   --input   Input analysis JSON file
   --output  Output HTML file
+
+Options (trace):
+  --url          URL to trace (required)
+  --runs         Number of trace runs (default: 3)
+  --network      Network profile: wifi 4g 3g slow-2g (default: 4g)
+  --viewport     Viewport profile: desktop tablet mobile (default: desktop)
+  --output       Save report to file (.html or .json)
+  --ai-provider  AI provider: anthropic | openai | gemini
+  --ai-key       API key for AI provider
+  --ai-model     Model name override
 `.trim();
 
 async function main(): Promise<void> {
@@ -152,6 +165,26 @@ async function main(): Promise<void> {
     if (!input)  { printError('--input is required');  process.exit(1); }
     if (!output) { printError('--output is required'); process.exit(1); }
     await runReport({ input, output });
+    return;
+  }
+
+  if (cmd === 'trace') {
+    const url = getString(args, 'url');
+    if (!url) { printError('--url is required'); process.exit(1); }
+    const aiProvider = getString(args, 'aiProvider');
+    const aiKey      = getString(args, 'aiKey');
+    const aiModel    = getString(args, 'aiModel');
+    const output     = getString(args, 'output');
+    await runTrace({
+      url,
+      runs:     getNumber(args, 'runs', 3),
+      network:  getString(args, 'network')  ?? '4g',
+      viewport: getString(args, 'viewport') ?? 'desktop',
+      ...(aiProvider ? { aiProvider } : {}),
+      ...(aiKey      ? { aiKey }      : {}),
+      ...(aiModel    ? { aiModel }    : {}),
+      ...(output     ? { output }     : {}),
+    });
     return;
   }
 

@@ -18,7 +18,7 @@
   "scripts": {
     "build":     "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test":      "vitest run --passWithNoTests",
+    "test":      "vitest run",
     "lint":      "eslint src --ext .ts",
     "clean":     "rm -rf dist"
   },

@@ -52,8 +52,9 @@ export interface SimulatorConfig {
   runs:              number;
   networks?:         NetworkProfile[];
   viewports?:        ViewportProfile[];
-  waitAfterLoad?:    number;
+  waitAfterLoad?:     number;
   interactAfterLoad?: boolean;
-  outputDir:         string;
-  concurrency?:      number;
+  captureTrace?:      boolean;
+  outputDir:          string;
+  concurrency?:       number;
 }

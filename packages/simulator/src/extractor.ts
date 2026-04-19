@@ -7,7 +7,8 @@ import type {
   NetworkProfile,
   ViewportProfile,
 } from '@vitalsage/types';
-import { VIEWPORT_PROFILES } from './profiles.js';
+import { VIEWPORT_PROFILES }    from './profiles.js';
+import { collectTraceMetrics }  from './tracer.js';
 
 interface PerfsageSession {
   metrics: Record<string, unknown>;
@@ -30,13 +31,16 @@ export async function extractSessionReport(
   networkProfile:  NetworkProfile,
   viewportProfile: ViewportProfile,
   sessionId:       string,
+  captureTrace     = false,
 ): Promise<SessionReport> {
   await page.waitForTimeout(500);
 
-  const session     = await page.evaluate(() => window.__vitalsage_session);
-  const navTiming   = await page.evaluate(extractNavTiming);
-  const pageContext = await page.evaluate(collectPageContext);
-  const userAgent   = await page.evaluate(() => navigator.userAgent);
+  const [session, navTiming, pageContext, userAgent] = await Promise.all([
+    page.evaluate(() => window.__vitalsage_session),
+    page.evaluate(extractNavTiming),
+    page.evaluate(collectPageContext),
+    page.evaluate(() => navigator.userAgent),
+  ]);
 
   const ttfbValue = navTiming.serverTime + navTiming.tlsTime + navTiming.dnsTime + navTiming.redirectTime;
   if (ttfbValue > 0) {
@@ -51,8 +55,10 @@ export async function extractSessionReport(
     };
   }
 
-  const viewport = VIEWPORT_PROFILES[viewportProfile];
-  const visitId  = generateId();
+  const viewport     = VIEWPORT_PROFILES[viewportProfile];
+  const visitId      = generateId();
+  const traceMetrics = captureTrace ? await collectTraceMetrics(page) : undefined;
+  const finalPage    = traceMetrics ? { ...pageContext, traceMetrics } : pageContext;
 
   return {
     sessionId,
@@ -74,7 +80,7 @@ export async function extractSessionReport(
       connection:          { type: networkProfile === 'wifi' ? 'wifi' : networkProfile },
       simulated:           { networkProfile, viewportProfile },
     },
-    page:       pageContext,
+    page:       finalPage,
     metrics:    session.metrics as CoreWebVitals,
     synthetic:  true,
     sdkVersion: '__VERSION__',

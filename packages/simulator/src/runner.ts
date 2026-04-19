@@ -113,7 +113,7 @@ export class PlaywrightSimulator {
         }
       }
 
-      return await extractSessionReport(page, url, run.network, run.viewport, generateId());
+      return await extractSessionReport(page, url, run.network, run.viewport, generateId(), config.captureTrace ?? false);
     } catch (err) {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);
       return null;

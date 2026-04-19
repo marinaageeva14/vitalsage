@@ -8,7 +8,8 @@ export type AgentName =
   | 'render-block'
   | 'resource-hint'
   | 'image'
-  | 'font';
+  | 'font'
+  | 'trace';
 
 export type Severity = 'critical' | 'warning' | 'info';
 export type Effort   = 'low' | 'medium' | 'high';

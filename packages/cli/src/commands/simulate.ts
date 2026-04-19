@@ -28,23 +28,33 @@ export async function runSimulate(args: SimulateArgs): Promise<void> {
   printInfo(`Simulating ${args.runs} runs against ${args.url}`);
   printInfo(`Output: ${args.output}`);
 
-  const progress = new ProgressBar(args.runs, 'Simulating');
-
+  const progress  = new ProgressBar(args.runs, 'Simulating');
   const simulator = new PlaywrightSimulator();
 
-  const patchedConfig: SimulatorConfig = {
-    ...config,
-    waitAfterLoad: config.waitAfterLoad ?? 2000,
+  // Patch console.log to tick the progress bar on each simulator log line
+  const origLog   = console.log.bind(console);
+  console.log     = (...a: unknown[]) => {
+    const msg = String(a[0] ?? '');
+    if (msg.includes('[VitalSage Simulator]') && /\d+\/\d+ runs complete/.test(msg)) {
+      const match = msg.match(/(\d+)\/\d+ runs complete/);
+      if (match) {
+        const done = parseInt(match[1]!, 10);
+        // tick to current done count
+        progress['current'] = 0;
+        for (let i = 0; i < done; i++) progress.tick();
+      }
+    } else {
+      origLog(...a);
+    }
   };
 
   try {
-    const sessions = await simulator.simulate({
-      ...patchedConfig,
-      runs: args.runs,
-    });
+    const sessions = await simulator.simulate(config);
+    console.log = origLog;
     progress.complete();
     printSuccess(`Collected ${sessions.length} sessions → ${args.output}`);
   } catch (err) {
+    console.log = origLog;
     progress.complete();
     printError(`Simulation failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

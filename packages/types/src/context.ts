@@ -33,6 +33,7 @@ export interface PageContext {
   scripts:          ScriptEntry[];
   stylesheets:      StylesheetEntry[];
   navigationTiming: NavigationTimingSnapshot;
+  traceMetrics?:    import('./trace.js').TraceMetrics;
 }
 
 export interface NavigationTimingSnapshot {

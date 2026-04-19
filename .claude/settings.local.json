@@ -10,7 +10,12 @@
       "Bash(pnpm typecheck *)",
       "Bash(grep -v \"^$\")",
       "Bash(pnpm build *)",
-      "Bash(pnpm test *)"
+      "Bash(pnpm test *)",
+      "Bash(pnpm --filter vitalsage-analysis tsc --noEmit)",
+      "Bash(pnpm --filter vitalsage-analysis exec tsc --noEmit)",
+      "Bash(pnpm --filter vitalsage-cli exec tsc --noEmit)",
+      "Bash(pnpm -r exec tsc --noEmit)",
+      "Bash(pnpm -r test --reporter=verbose)"
     ]
   }
 }

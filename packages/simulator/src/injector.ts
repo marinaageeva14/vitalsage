@@ -2,7 +2,7 @@
 // Must NOT import Node.js modules — serialized and run in browser context.
 export const INJECTOR_SCRIPT = `
 (function() {
-  window.__vitalsage_session = { metrics: {}, startTime: Date.now() };
+  window.__vitalsage_session = { metrics: {}, longTasks: [], startTime: Date.now() };
 
   function rateMetric(name, value) {
     var t = { LCP:{g:2500,p:4000}, FCP:{g:1800,p:3000}, CLS:{g:0.1,p:0.25}, INP:{g:200,p:500}, TTFB:{g:800,p:1800} };
@@ -54,6 +54,22 @@ export const INJECTOR_SCRIPT = `
         }
       }
     }).observe({ type:'event', buffered:true, durationThreshold:16 });
+  } catch(e) {}
+
+  // Collect long tasks (> 50ms) for Total Blocking Time calculation
+  try {
+    new PerformanceObserver(function(list) {
+      for (var entry of list.getEntries()) {
+        var blocking = entry.duration - 50;
+        if (blocking > 0) {
+          window.__vitalsage_session.longTasks.push({
+            startTime: entry.startTime,
+            duration:  entry.duration,
+            blocking:  blocking,
+          });
+        }
+      }
+    }).observe({ type:'longtask', buffered:true });
   } catch(e) {}
 })();
 `;
