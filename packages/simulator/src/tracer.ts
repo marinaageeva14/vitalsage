@@ -17,18 +17,32 @@ interface PageMetrics {
   [key: string]:       number | undefined;
 }
 
+export interface LoadPhaseSnapshot {
+  metrics:   Record<string, number>;
+  longTasks: Array<{ startTime: number; duration: number; blocking: number }>;
+}
+
 // cdpSession must have had Performance.enable called BEFORE page.goto().
-// loadPhaseMetrics should be the snapshot taken immediately after networkidle —
-// passing it here prevents the post-load wait period from inflating the timings.
+// loadPhase should be the snapshot taken immediately after networkidle so that
+// timing counters, TBT, and long tasks all reflect the same measurement window.
 export async function collectTraceMetrics(
-  page:             Page,
-  cdpSession?:      CDPSession,
-  loadPhaseMetrics?: Record<string, number>,
+  page:          Page,
+  cdpSession?:   CDPSession,
+  loadPhase?:    LoadPhaseSnapshot,
 ): Promise<TraceMetrics> {
   let pageMetrics: PageMetrics;
+  let rawLongTaskSource: Array<{ startTime: number; duration: number; blocking: number }>;
 
-  if (loadPhaseMetrics) {
-    pageMetrics = loadPhaseMetrics as unknown as PageMetrics;
+  if (loadPhase) {
+    pageMetrics = { ...loadPhase.metrics } as unknown as PageMetrics;
+    rawLongTaskSource = loadPhase.longTasks;
+    // Heap is read live (after waitAfterLoad) — it reflects the fully settled page.
+    if (cdpSession) {
+      const { metrics } = await cdpSession.send('Performance.getMetrics') as { metrics: CDPMetric[] };
+      const live = Object.fromEntries(metrics.map(m => [m.name, m.value]));
+      const liveHeap = live['JSHeapUsedSize'];
+      if (liveHeap !== undefined) pageMetrics.JSHeapUsedSize = liveHeap;
+    }
   } else {
     let client: CDPSession;
     let owned = false;
@@ -45,15 +59,14 @@ export async function collectTraceMetrics(
     } finally {
       if (owned) await client.detach().catch(() => {});
     }
+    rawLongTaskSource = await page.evaluate(() => {
+      type E = { startTime: number; duration: number; blocking: number };
+      const s = (window as unknown as { __vitalsage_session?: { longTasks?: E[] } }).__vitalsage_session;
+      return s?.longTasks ?? ([] as E[]);
+    });
   }
 
-  const rawLongTasks = await page.evaluate(() => {
-    type LongTaskEntry = { startTime: number; duration: number; blocking: number };
-    const s = (window as unknown as { __vitalsage_session?: { longTasks?: LongTaskEntry[] } }).__vitalsage_session;
-    return s?.longTasks ?? ([] as LongTaskEntry[]);
-  });
-
-  const longTasks: LongTask[] = (rawLongTasks as Array<{ startTime: number; duration: number; blocking: number }>)
+  const longTasks: LongTask[] = rawLongTaskSource
     .map(t => ({ startTime: t.startTime, duration: t.duration, blocking: t.blocking }))
     .sort((a, b) => b.duration - a.duration);
 

@@ -1,4 +1,5 @@
 import { chromium, type Browser, type CDPSession } from 'playwright';
+import type { LoadPhaseSnapshot } from './tracer.js';
 import { mkdir, writeFile }       from 'node:fs/promises';
 import { join }                   from 'node:path';
 import type { SimulatorConfig, SessionReport, NetworkProfile, ViewportProfile } from '@vitalsage/types';
@@ -112,12 +113,22 @@ export class PlaywrightSimulator {
 
       await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
 
-      // Snapshot immediately at networkidle — before post-load timers run.
-      // This matches the DevTools/Lighthouse measurement window.
-      let loadPhaseMetrics: Record<string, number> | undefined;
+      // Snapshot immediately at networkidle so that timing counters, TBT, and
+      // long tasks all reflect the same load-phase window (comparable to DevTools).
+      let loadPhase: LoadPhaseSnapshot | undefined;
       if (config.captureTrace && perfCdp) {
-        const { metrics } = await perfCdp.send('Performance.getMetrics') as { metrics: Array<{ name: string; value: number }> };
-        loadPhaseMetrics = Object.fromEntries(metrics.map(m => [m.name, m.value]));
+        const [{ metrics }, longTasks] = await Promise.all([
+          perfCdp.send('Performance.getMetrics') as Promise<{ metrics: Array<{ name: string; value: number }> }>,
+          page.evaluate(() => {
+            type E = { startTime: number; duration: number; blocking: number };
+            const s = (window as unknown as { __vitalsage_session?: { longTasks?: E[] } }).__vitalsage_session;
+            return s?.longTasks ? [...s.longTasks] as E[] : [] as E[];
+          }),
+        ]);
+        loadPhase = {
+          metrics:   Object.fromEntries(metrics.map(m => [m.name, m.value])),
+          longTasks,
+        };
       }
 
       await page.waitForTimeout(config.waitAfterLoad ?? 3000);
@@ -142,7 +153,7 @@ export class PlaywrightSimulator {
 
       return await extractSessionReport(
         page, url, run.network, run.viewport, generateId(),
-        config.captureTrace ?? false, perfCdp, screenshot, loadPhaseMetrics,
+        config.captureTrace ?? false, perfCdp, screenshot, loadPhase,
       );
     } catch (err) {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);

@@ -1,4 +1,5 @@
 import type { Page, CDPSession } from 'playwright';
+import type { LoadPhaseSnapshot } from './tracer.js';
 import type {
   SessionReport,
   PageContext,
@@ -31,10 +32,10 @@ export async function extractSessionReport(
   networkProfile:    NetworkProfile,
   viewportProfile:   ViewportProfile,
   sessionId:         string,
-  captureTrace       = false,
-  cdpSession?:       CDPSession,
-  screenshot?:       string,
-  loadPhaseMetrics?: Record<string, number>,
+  captureTrace    = false,
+  cdpSession?:    CDPSession,
+  screenshot?:    string,
+  loadPhase?:     LoadPhaseSnapshot,
 ): Promise<SessionReport> {
   await page.waitForTimeout(500);
 
@@ -60,7 +61,7 @@ export async function extractSessionReport(
 
   const viewport     = VIEWPORT_PROFILES[viewportProfile];
   const visitId      = generateId();
-  const traceMetrics = captureTrace ? await collectTraceMetrics(page, cdpSession, loadPhaseMetrics) : undefined;
+  const traceMetrics = captureTrace ? await collectTraceMetrics(page, cdpSession, loadPhase) : undefined;
   const extras = {
     ...(traceMetrics ? { traceMetrics } : {}),
     ...(screenshot   ? { screenshot }   : {}),
