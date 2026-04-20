@@ -149,10 +149,15 @@ function renderTracePanel(tm: TraceMetrics): string {
   const heapCls   = tm.jsHeapUsed !== undefined ? (tm.jsHeapUsed >= 100 ? 'warn' : 'good') : 'dim';
 
   return `<div class="trace-panel">
-    <div class="trace-panel-title">Main Thread Breakdown</div>
-    ${bar('Scripting',  tm.scriptingTime,  500,  1500)}
-    ${bar('Rendering',  tm.renderingTime,  200,  800)}
-    ${bar('Painting',   tm.paintingTime,   100,  400)}
+    <div class="trace-panel-title">Main Thread CPU Breakdown</div>
+    <div style="font-size:0.72rem;color:#64748b;margin-bottom:10px">CPU time only — does not include network/idle wait</div>
+    ${bar('JS Execute',  tm.scriptingTime,  500,  1500)}
+    ${bar('JS Compile',  tm.jsCompileTime,  200,   800)}
+    ${bar('Rendering',   tm.renderingTime,  200,   800)}
+    <div class="trace-bar-row" style="opacity:0.45">
+      <span class="trace-bar-label">Paint</span>
+      <span style="font-size:0.75rem;color:#64748b">compositor-threaded · off main thread</span>
+    </div>
     <div style="margin-top:12px">
       ${kv('Total Blocking Time', `${Math.round(tm.totalBlockingTime).toLocaleString()}ms · ${tm.longTaskCount} task(s)`, tbtCls)}
       ${kv('Forced Layouts',  String(tm.layoutCount),    layoutCls)}

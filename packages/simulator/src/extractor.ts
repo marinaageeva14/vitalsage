@@ -26,14 +26,15 @@ function generateId(): string {
 }
 
 export async function extractSessionReport(
-  page:            Page,
-  url:             string,
-  networkProfile:  NetworkProfile,
-  viewportProfile: ViewportProfile,
-  sessionId:       string,
-  captureTrace     = false,
-  cdpSession?:     CDPSession,
-  screenshot?:     string,
+  page:              Page,
+  url:               string,
+  networkProfile:    NetworkProfile,
+  viewportProfile:   ViewportProfile,
+  sessionId:         string,
+  captureTrace       = false,
+  cdpSession?:       CDPSession,
+  screenshot?:       string,
+  loadPhaseMetrics?: Record<string, number>,
 ): Promise<SessionReport> {
   await page.waitForTimeout(500);
 
@@ -59,7 +60,7 @@ export async function extractSessionReport(
 
   const viewport     = VIEWPORT_PROFILES[viewportProfile];
   const visitId      = generateId();
-  const traceMetrics = captureTrace ? await collectTraceMetrics(page, cdpSession) : undefined;
+  const traceMetrics = captureTrace ? await collectTraceMetrics(page, cdpSession, loadPhaseMetrics) : undefined;
   const extras = {
     ...(traceMetrics ? { traceMetrics } : {}),
     ...(screenshot   ? { screenshot }   : {}),

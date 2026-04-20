@@ -9,9 +9,9 @@ export interface TraceMetrics {
   longTaskCount:      number;
   longTasks:          LongTask[];
   mainThreadWork:     number;
-  scriptingTime:      number;
-  renderingTime:      number;
-  paintingTime:       number;
+  scriptingTime:      number;   // JS execution CPU time (V8 main thread)
+  jsCompileTime:      number;   // JS parse + compile CPU time (subset of scripting)
+  renderingTime:      number;   // style recalc + layout CPU time
   layoutCount:        number;
   styleRecalcCount:   number;
   domNodes:           number;

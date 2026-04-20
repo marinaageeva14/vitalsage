@@ -63,23 +63,24 @@ function printCoreWebVitals(sessions: SessionReport[]): void {
 function printTraceMetrics(tm: TraceMetrics): void {
   console.log('');
   console.log(color('━'.repeat(50), DIM));
-  console.log(`  ${color('Main Thread Breakdown', BOLD)}`);
+  console.log(`  ${color('Main Thread Breakdown', BOLD)}  ${color('(CPU time, not wall-clock)', DIM)}`);
   console.log(color('━'.repeat(50), DIM));
 
   const total = Math.max(tm.mainThreadWork, 1);
 
-  const rows: Array<[string, number, string, number, number]> = [
-    ['Scripting',  tm.scriptingTime,  'ms', 500,  1500],
-    ['Rendering',  tm.renderingTime,  'ms', 200,  800],
-    ['Painting',   tm.paintingTime,   'ms', 100,  400],
+  const rows: Array<[string, number, number, number]> = [
+    ['JS Execute',  tm.scriptingTime,  500,  1500],
+    ['JS Compile',  tm.jsCompileTime,  200,   800],
+    ['Rendering',   tm.renderingTime,  200,   800],
   ];
 
-  for (const [label, value, , warn, crit] of rows) {
+  for (const [label, value, warn, crit] of rows) {
     const c   = traceColor(value, warn, crit);
     const pct = Math.min(value / total, 1);
     const pad = ' '.repeat(Math.max(0, 12 - label.length));
     console.log(`  ${color(label, BOLD)}${pad}  ${bar(pct)}  ${color(fmtMs(value).padStart(8), c)}`);
   }
+  console.log(`  ${color('Paint', DIM)}${''.padStart(10)}  ${color('compositor-threaded (off main thread)', DIM)}`);
 
   console.log('');
   console.log(`  ${color('Key Metrics', BOLD)}`);

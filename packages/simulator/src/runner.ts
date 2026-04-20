@@ -111,6 +111,15 @@ export class PlaywrightSimulator {
         : config.url.replace(/\/$/, '') + run.route;
 
       await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+
+      // Snapshot immediately at networkidle — before post-load timers run.
+      // This matches the DevTools/Lighthouse measurement window.
+      let loadPhaseMetrics: Record<string, number> | undefined;
+      if (config.captureTrace && perfCdp) {
+        const { metrics } = await perfCdp.send('Performance.getMetrics') as { metrics: Array<{ name: string; value: number }> };
+        loadPhaseMetrics = Object.fromEntries(metrics.map(m => [m.name, m.value]));
+      }
+
       await page.waitForTimeout(config.waitAfterLoad ?? 3000);
 
       if (config.interactAfterLoad !== false) {
@@ -133,7 +142,7 @@ export class PlaywrightSimulator {
 
       return await extractSessionReport(
         page, url, run.network, run.viewport, generateId(),
-        config.captureTrace ?? false, perfCdp, screenshot,
+        config.captureTrace ?? false, perfCdp, screenshot, loadPhaseMetrics,
       );
     } catch (err) {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);

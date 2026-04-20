@@ -6,9 +6,9 @@ interface CDPMetric { name: string; value: number }
 interface PageMetrics {
   TaskDuration:        number;
   ScriptDuration:      number;
+  V8CompileDuration:   number;
   RecalcStyleDuration: number;
   LayoutDuration:      number;
-  PaintDuration:       number;
   LayoutCount:         number;
   RecalcStyleCount:    number;
   Nodes:               number;
@@ -17,26 +17,34 @@ interface PageMetrics {
   [key: string]:       number | undefined;
 }
 
-// cdpSession must have had Performance.enable called BEFORE page.goto() —
-// if omitted a fresh session is created (metrics will only reflect post-call activity).
-export async function collectTraceMetrics(page: Page, cdpSession?: CDPSession): Promise<TraceMetrics> {
-  let client: CDPSession;
-  let owned = false;
-
-  if (cdpSession) {
-    client = cdpSession;
-  } else {
-    client = await page.context().newCDPSession(page);
-    await client.send('Performance.enable');
-    owned = true;
-  }
-
+// cdpSession must have had Performance.enable called BEFORE page.goto().
+// loadPhaseMetrics should be the snapshot taken immediately after networkidle —
+// passing it here prevents the post-load wait period from inflating the timings.
+export async function collectTraceMetrics(
+  page:             Page,
+  cdpSession?:      CDPSession,
+  loadPhaseMetrics?: Record<string, number>,
+): Promise<TraceMetrics> {
   let pageMetrics: PageMetrics;
-  try {
-    const { metrics } = await client.send('Performance.getMetrics') as { metrics: CDPMetric[] };
-    pageMetrics = Object.fromEntries(metrics.map(m => [m.name, m.value])) as unknown as PageMetrics;
-  } finally {
-    if (owned) await client.detach().catch(() => {});
+
+  if (loadPhaseMetrics) {
+    pageMetrics = loadPhaseMetrics as unknown as PageMetrics;
+  } else {
+    let client: CDPSession;
+    let owned = false;
+    if (cdpSession) {
+      client = cdpSession;
+    } else {
+      client = await page.context().newCDPSession(page);
+      await client.send('Performance.enable');
+      owned = true;
+    }
+    try {
+      const { metrics } = await client.send('Performance.getMetrics') as { metrics: CDPMetric[] };
+      pageMetrics = Object.fromEntries(metrics.map(m => [m.name, m.value])) as unknown as PageMetrics;
+    } finally {
+      if (owned) await client.detach().catch(() => {});
+    }
   }
 
   const rawLongTasks = await page.evaluate(() => {
@@ -57,8 +65,8 @@ export async function collectTraceMetrics(page: Page, cdpSession?: CDPSession): 
     longTasks,
     mainThreadWork:   Math.round((pageMetrics.TaskDuration ?? 0) * 1000),
     scriptingTime:    Math.round((pageMetrics.ScriptDuration ?? 0) * 1000),
+    jsCompileTime:    Math.round((pageMetrics.V8CompileDuration ?? 0) * 1000),
     renderingTime:    Math.round(((pageMetrics.RecalcStyleDuration ?? 0) + (pageMetrics.LayoutDuration ?? 0)) * 1000),
-    paintingTime:     Math.round((pageMetrics.PaintDuration ?? 0) * 1000),
     layoutCount:      Math.round(pageMetrics.LayoutCount ?? 0),
     styleRecalcCount: Math.round(pageMetrics.RecalcStyleCount ?? 0),
     domNodes:         Math.round(pageMetrics.Nodes ?? 0),
