@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VitalSage Demo — Gallery</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">VitalSage Demo</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="products.html">Products</a></li>
+      <li><a href="gallery.html" class="active">Gallery</a></li>
+      <li><a href="heavy.html">Heavy Page</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    <section class="page-header">
+      <h1>Gallery</h1>
+      <p class="lead">Image loading — LCP and CLS test scenario.</p>
+    </section>
+
+    <div class="test-info">
+      <strong>What this tests:</strong>
+      <ul>
+        <li><strong>LCP</strong> — the largest image in the viewport is the LCP candidate. Switch between "Sized" and "Unsized" tabs to compare.</li>
+        <li><strong>CLS</strong> — images without explicit width/height cause layout shifts as they load.</li>
+        <li><strong>Image LCP vs text LCP</strong> — LCP here should be higher than on the Home page.</li>
+      </ul>
+    </div>
+
+    <!-- Toggle between sized and unsized images -->
+    <div class="tabs" role="tablist">
+      <button class="tab active" role="tab" data-tab="sized"   aria-selected="true">✅ Sized images (good CLS)</button>
+      <button class="tab"        role="tab" data-tab="unsized" aria-selected="false">⚠️ Unsized images (bad CLS)</button>
+    </div>
+
+    <!-- Sized images — explicit width + height prevents CLS -->
+    <div id="tab-sized" class="tab-panel gallery-grid" role="tabpanel">
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps1/600/400" width="600" height="400" alt="Scenic landscape 1" loading="lazy">
+        <figcaption>Mountain Sunrise</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps2/600/400" width="600" height="400" alt="Scenic landscape 2" loading="lazy">
+        <figcaption>Forest Path</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps3/600/400" width="600" height="400" alt="Scenic landscape 3" loading="eager">
+        <figcaption>Ocean Shore</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps4/600/400" width="600" height="400" alt="City skyline" loading="lazy">
+        <figcaption>City at Night</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps5/600/400" width="600" height="400" alt="Desert dunes" loading="lazy">
+        <figcaption>Desert Dunes</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps6/600/400" width="600" height="400" alt="Snow peaks" loading="lazy">
+        <figcaption>Snow Peaks</figcaption>
+      </figure>
+    </div>
+
+    <!-- Unsized images — no dimensions → layout shift as each loads -->
+    <div id="tab-unsized" class="tab-panel gallery-grid hidden" role="tabpanel">
+      <!-- LCP hero — intentionally large, no dimensions -->
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps7/800/600" alt="Hero landscape — LCP candidate, no dimensions">
+        <figcaption>⚠️ Hero Image (no size attrs — triggers CLS)</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps8/600/400" alt="Scenic landscape 5 — no dimensions">
+        <figcaption>Waterfall</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps9/600/400" alt="Scenic landscape 6 — no dimensions">
+        <figcaption>Canyon</figcaption>
+      </figure>
+      <figure class="gallery-item">
+        <img src="https://picsum.photos/seed/ps10/600/400" alt="Scenic landscape 7 — no dimensions">
+        <figcaption>Rainforest</figcaption>
+      </figure>
+    </div>
+  </main>
+
+  <script type="module">
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        document.querySelectorAll('.tab').forEach(t => {
+          t.classList.toggle('active', t.dataset.tab === target);
+          t.setAttribute('aria-selected', t.dataset.tab === target);
+        });
+        document.querySelectorAll('.tab-panel').forEach(panel => {
+          panel.classList.toggle('hidden', panel.id !== `tab-${target}`);
+        });
+      });
+    });
+  </script>
+
+  <script type="module" src="./vitalsage-init.js"></script>
+</body>
+</html>

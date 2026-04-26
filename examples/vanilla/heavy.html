@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VitalSage Demo — Heavy Page</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">VitalSage Demo</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="products.html">Products</a></li>
+      <li><a href="gallery.html">Gallery</a></li>
+      <li><a href="heavy.html" class="active">Heavy Page</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    <section class="page-header">
+      <h1>CPU-Heavy Page</h1>
+      <p class="lead">Long tasks and TBT test scenario.</p>
+    </section>
+
+    <div class="test-info">
+      <strong>What this tests:</strong>
+      <ul>
+        <li><strong>TBT</strong> — Total Blocking Time: sum of time each long task blocks the main thread beyond 50 ms.</li>
+        <li><strong>INP</strong> — Click the "Run Computation" button while the page is loading to experience a delayed response.</li>
+        <li><strong>Long Tasks</strong> — each "block" below is a synchronous loop running for ~150 ms.</li>
+        <li><strong>LCP</strong> — may be delayed because the main thread is blocked during initial load.</li>
+      </ul>
+    </div>
+
+    <div class="heavy-controls">
+      <button id="btn-run" class="btn btn-primary btn-lg">▶ Run Computation</button>
+      <button id="btn-clear" class="btn btn-secondary btn-lg">🗑 Clear Log</button>
+      <label class="control-label">
+        <input type="range" id="task-count" min="1" max="10" value="5">
+        <span id="task-count-label">5 tasks × ~150 ms each</span>
+      </label>
+    </div>
+
+    <div id="task-log" class="task-log">
+      <p class="log-hint">Click "Run Computation" or wait for the auto-run on load.</p>
+    </div>
+
+    <section class="heavy-section">
+      <h2>DOM Stress</h2>
+      <p>Clicking the button below creates 500 DOM nodes at once — tests rendering/layout time.</p>
+      <button id="btn-dom" class="btn btn-secondary">Inject 500 nodes</button>
+      <div id="dom-container" class="dom-container"></div>
+    </section>
+
+    <section class="heavy-section">
+      <h2>Forced Layout Thrash</h2>
+      <p>Reads and writes layout in a loop — triggers repeated style recalculations.</p>
+      <button id="btn-thrash" class="btn btn-secondary">Thrash Layout (10 reads/writes)</button>
+      <div id="thrash-result" class="thrash-result"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    // ── Blocking long task helper ──────────────────────────────────────
+    function blockThread(ms) {
+      const end = performance.now() + ms;
+      let x = 0;
+      while (performance.now() < end) { x++; }
+      return x; // prevent dead-code elimination
+    }
+
+    // ── Task log ──────────────────────────────────────────────────────
+    const log = document.getElementById('task-log');
+    function addLog(msg, type = 'info') {
+      const p = document.createElement('p');
+      p.className = `log-entry log-${type}`;
+      p.textContent = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+      log.insertBefore(p, log.firstChild);
+    }
+
+    // ── Run computation ───────────────────────────────────────────────
+    const slider = document.getElementById('task-count');
+    const sliderLabel = document.getElementById('task-count-label');
+
+    slider.addEventListener('input', () => {
+      sliderLabel.textContent = `${slider.value} tasks × ~150 ms each`;
+    });
+
+    function runComputation(count) {
+      const btn = document.getElementById('btn-run');
+      btn.disabled = true;
+      btn.textContent = '⏳ Running…';
+      addLog(`Starting ${count} blocking tasks…`, 'info');
+
+      // Use setTimeout to let the UI update before each block
+      let i = 0;
+      function next() {
+        if (i >= count) {
+          btn.disabled = false;
+          btn.textContent = '▶ Run Computation';
+          addLog(`Done. ${count} tasks completed.`, 'success');
+          return;
+        }
+        const t0 = performance.now();
+        const ops = blockThread(150);
+        const dt  = performance.now() - t0;
+        addLog(`Task ${i + 1}/${count}: blocked for ${dt.toFixed(1)} ms (${ops.toLocaleString()} ops)`, 'warn');
+        i++;
+        setTimeout(next, 10);
+      }
+      setTimeout(next, 0);
+    }
+
+    document.getElementById('btn-run').addEventListener('click', () => {
+      runComputation(Number(slider.value));
+    });
+
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      log.innerHTML = '<p class="log-hint">Log cleared.</p>';
+    });
+
+    // ── Auto-run on load to inflate TBT ───────────────────────────────
+    // Two back-to-back long tasks during page load (before LCP finalises).
+    window.addEventListener('DOMContentLoaded', () => {
+      addLog('Auto-run: 2 blocking tasks during load phase…', 'info');
+      blockThread(200); // task 1 — should appear as long task
+      blockThread(200); // task 2 — should appear as long task
+      addLog('Auto-run complete. TBT should reflect these tasks.', 'success');
+    });
+
+    // ── DOM injection ─────────────────────────────────────────────────
+    document.getElementById('btn-dom').addEventListener('click', () => {
+      const container = document.getElementById('dom-container');
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < 500; i++) {
+        const div = document.createElement('div');
+        div.className = 'dom-node';
+        div.textContent = `Node ${i + 1}`;
+        frag.appendChild(div);
+      }
+      container.innerHTML = '';
+      container.appendChild(frag);
+      addLog('Injected 500 DOM nodes.', 'success');
+    });
+
+    // ── Layout thrash ─────────────────────────────────────────────────
+    document.getElementById('btn-thrash').addEventListener('click', () => {
+      const result = document.getElementById('thrash-result');
+      let total = 0;
+      for (let i = 0; i < 10; i++) {
+        // Read (forces layout)
+        const w = document.body.offsetWidth;
+        // Write (invalidates layout)
+        result.style.width = `${w - i}px`;
+        total += w;
+      }
+      result.textContent = `Layout thrash complete. Total measured width: ${total}px`;
+      addLog('Layout thrash: 10 forced reflows.', 'warn');
+    });
+  </script>
+
+  <script type="module" src="./vitalsage-init.js"></script>
+</body>
+</html>

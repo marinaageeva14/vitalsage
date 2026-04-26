@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VitalSage Demo — Home</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">VitalSage Demo</a>
+    <ul class="nav-links">
+      <li><a href="index.html" class="active">Home</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="products.html">Products</a></li>
+      <li><a href="gallery.html">Gallery</a></li>
+      <li><a href="heavy.html">Heavy Page</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    <section class="hero">
+      <h1>VitalSage Testing App</h1>
+      <p class="lead">
+        This app exists to validate that the VitalSage SDK correctly captures
+        Core Web Vitals and performance metrics across different real-world scenarios.
+      </p>
+      <div class="cta-group">
+        <a href="products.html" class="btn btn-primary">View Products</a>
+        <a href="gallery.html" class="btn btn-secondary">View Gallery</a>
+      </div>
+    </section>
+
+    <section class="scenarios">
+      <h2>Test Scenarios</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="card-icon">🏠</div>
+          <h3>Initial Load (here)</h3>
+          <p>Static content — tests LCP from in-line text/hero block, fast TTFB, minimal CLS.</p>
+          <a href="index.html" class="btn btn-sm">Open</a>
+        </div>
+        <div class="card">
+          <div class="card-icon">📄</div>
+          <h3>Navigation</h3>
+          <p>Simple about page — tests that metrics reset correctly on soft navigation.</p>
+          <a href="about.html" class="btn btn-sm">Open</a>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔄</div>
+          <h3>Async / Spinner</h3>
+          <p>Products list fetched after 1.5 s delay — tests LCP with late-rendered content and CLS from spinner-to-list swap.</p>
+          <a href="products.html" class="btn btn-sm">Open</a>
+        </div>
+        <div class="card">
+          <div class="card-icon">🖼️</div>
+          <h3>Images</h3>
+          <p>Gallery of images — tests LCP from largest image, CLS from unsized images.</p>
+          <a href="gallery.html" class="btn btn-sm">Open</a>
+        </div>
+        <div class="card">
+          <div class="card-icon">⚙️</div>
+          <h3>CPU Heavy</h3>
+          <p>Runs a blocking JS loop on load — tests TBT, long tasks, and INP from user interaction during busy thread.</p>
+          <a href="heavy.html" class="btn btn-sm">Open</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="info">
+      <h2>What to Check</h2>
+      <ul>
+        <li>Open DevTools → Console — VitalSage logs each metric as it fires.</li>
+        <li>Watch the <strong>debug panel</strong> (bottom-right) update in real time.</li>
+        <li>Navigate between pages and confirm metrics reset per page.</li>
+        <li>
+          Check the Express server at
+          <a href="http://localhost:3001/api/sessions" target="_blank">
+            localhost:3001/api/sessions
+          </a>
+          for saved session data.
+        </li>
+        <li>Open the Application tab → IndexedDB → vitalsage → sessions to see locally stored reports.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module" src="./vitalsage-init.js"></script>
+</body>
+</html>

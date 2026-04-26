@@ -16,9 +16,10 @@ export class NavigationObserver {
   start(): void {
     if (this.mode === 'mpa') return;
 
-    // Prefer modern Navigation API (Chrome 102+)
+    // Prefer modern Navigation API (Chrome 102+).
+    // Use a microtask so location.href has updated before we read it.
     if ('navigation' in window) {
-      const handler = () => this.handleNavigation();
+      const handler = () => queueMicrotask(() => this.handleNavigation());
       (window as unknown as { navigation: EventTarget }).navigation
         .addEventListener('navigate', handler);
       this.cleanups.push(() =>

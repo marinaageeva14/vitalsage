@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VitalSage Demo — Products</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">VitalSage Demo</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="products.html" class="active">Products</a></li>
+      <li><a href="gallery.html">Gallery</a></li>
+      <li><a href="heavy.html">Heavy Page</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    <section class="page-header">
+      <h1>Products</h1>
+      <p class="lead">Async data loading — LCP and CLS test scenario.</p>
+    </section>
+
+    <div class="test-info">
+      <strong>What this tests:</strong>
+      Products are fetched after a simulated 1 500 ms network delay.
+      Watch for:
+      <ul>
+        <li>LCP fires late (after the product grid renders, not at initial HTML)</li>
+        <li>CLS may spike when the spinner is replaced by the product grid</li>
+        <li>TTFB reflects the initial HTML load, not the data fetch</li>
+      </ul>
+    </div>
+
+    <!-- Spinner shown while data loads -->
+    <div id="loading-state" class="spinner-container" aria-live="polite">
+      <div class="spinner" role="status" aria-label="Loading products…"></div>
+      <p>Loading products…</p>
+    </div>
+
+    <!-- Product grid — hidden until data arrives -->
+    <div id="products-grid" class="products-grid hidden" aria-live="polite"></div>
+
+    <!-- Filter bar injected after load — intentional CLS source -->
+    <div id="filter-bar" class="filter-bar hidden">
+      <button class="filter-btn active" data-category="all">All</button>
+      <button class="filter-btn" data-category="electronics">Electronics</button>
+      <button class="filter-btn" data-category="clothing">Clothing</button>
+      <button class="filter-btn" data-category="books">Books</button>
+    </div>
+  </main>
+
+  <script type="module">
+    // ── Fake product data ──────────────────────────────────────────────
+    const PRODUCTS = [
+      { id: 1,  name: 'Wireless Headphones',  price: 79.99,  category: 'electronics', rating: 4.5, reviews: 312 },
+      { id: 2,  name: 'Running Shoes',         price: 59.99,  category: 'clothing',    rating: 4.2, reviews: 198 },
+      { id: 3,  name: 'JavaScript: The Good Parts', price: 24.99, category: 'books', rating: 4.8, reviews: 901 },
+      { id: 4,  name: 'USB-C Hub',             price: 39.99,  category: 'electronics', rating: 4.0, reviews: 447 },
+      { id: 5,  name: 'Yoga Mat',              price: 29.99,  category: 'clothing',    rating: 4.6, reviews: 263 },
+      { id: 6,  name: 'Clean Code',            price: 32.99,  category: 'books',       rating: 4.7, reviews: 1204 },
+      { id: 7,  name: 'Mechanical Keyboard',   price: 119.99, category: 'electronics', rating: 4.9, reviews: 532 },
+      { id: 8,  name: 'Hoodie',                price: 44.99,  category: 'clothing',    rating: 4.3, reviews: 87  },
+      { id: 9,  name: 'The Pragmatic Programmer', price: 37.99, category: 'books',    rating: 4.9, reviews: 2011 },
+      { id: 10, name: 'Portable Charger',      price: 34.99,  category: 'electronics', rating: 4.1, reviews: 679 },
+      { id: 11, name: 'Denim Jacket',          price: 64.99,  category: 'clothing',    rating: 4.4, reviews: 156 },
+      { id: 12, name: 'Refactoring',           price: 41.99,  category: 'books',       rating: 4.8, reviews: 743 },
+    ];
+
+    function stars(rating) {
+      return '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
+    }
+
+    function renderProduct(p) {
+      return `
+        <div class="product-card" data-category="${p.category}">
+          <div class="product-thumb" aria-hidden="true">${{ electronics: '🔌', clothing: '👕', books: '📚' }[p.category]}</div>
+          <div class="product-body">
+            <h3 class="product-name">${p.name}</h3>
+            <div class="product-meta">
+              <span class="product-rating" title="${p.rating}/5">${stars(p.rating)}</span>
+              <span class="product-reviews">(${p.reviews})</span>
+            </div>
+            <div class="product-footer">
+              <span class="product-price">$${p.price.toFixed(2)}</span>
+              <button class="btn btn-sm btn-primary add-to-cart" data-id="${p.id}">Add to cart</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Simulate async data fetch ──────────────────────────────────────
+    async function fetchProducts() {
+      await new Promise(r => setTimeout(r, 1500)); // simulate network delay
+      return PRODUCTS;
+    }
+
+    async function init() {
+      const products = await fetchProducts();
+
+      const grid    = document.getElementById('products-grid');
+      const spinner = document.getElementById('loading-state');
+      const filters = document.getElementById('filter-bar');
+
+      // Replace spinner with grid  →  intentional layout shift
+      spinner.classList.add('hidden');
+      grid.innerHTML = products.map(renderProduct).join('');
+      grid.classList.remove('hidden');
+
+      // Inject filter bar below grid after a tiny delay  →  more CLS
+      setTimeout(() => {
+        filters.classList.remove('hidden');
+      }, 200);
+
+      // Filter interaction  →  tests INP
+      filters.addEventListener('click', (e) => {
+        const btn = e.target.closest('.filter-btn');
+        if (!btn) return;
+        const cat = btn.dataset.category;
+        filters.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        grid.querySelectorAll('.product-card').forEach(card => {
+          card.style.display = (cat === 'all' || card.dataset.category === cat) ? '' : 'none';
+        });
+      });
+
+      // Cart interaction  →  tests INP
+      grid.addEventListener('click', (e) => {
+        const btn = e.target.closest('.add-to-cart');
+        if (!btn) return;
+        btn.textContent = '✓ Added';
+        btn.disabled = true;
+        setTimeout(() => { btn.textContent = 'Add to cart'; btn.disabled = false; }, 1500);
+      });
+    }
+
+    init();
+  </script>
+
+  <script type="module" src="./vitalsage-init.js"></script>
+</body>
+</html>

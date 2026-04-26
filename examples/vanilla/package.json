@@ -1,0 +1,9 @@
+{
+  "name": "vitalsage-example-vanilla",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx serve . -p 5173 --cors"
+  }
+}

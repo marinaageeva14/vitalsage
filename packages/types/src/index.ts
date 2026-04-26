@@ -2,6 +2,7 @@ export * from './ai.js';
 export * from './analysis.js';
 export * from './config.js';
 export * from './context.js';
+export * from './interaction.js';
 export * from './metrics.js';
 export * from './routing.js';
 export * from './session.js';

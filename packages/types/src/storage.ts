@@ -1,10 +1,10 @@
-import type { MetricDataPoint, SessionReport } from './session.js';
+import type { Interaction } from './interaction.js';
 
 export interface StorageAdapter {
-  onMetric?: (metric: MetricDataPoint) => void | Promise<void>;
-  onReport?: (report: SessionReport) => void | Promise<void>;
+  onInteraction?: (interaction: Interaction) => void | Promise<void>;
 }
 
+/** @deprecated No longer used by the client SDK — kept for backward compatibility. */
 export interface BatchingConfig {
   enabled:        boolean;
   maxSize?:       number;

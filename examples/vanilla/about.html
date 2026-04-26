@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VitalSage Demo — About</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">VitalSage Demo</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="about.html" class="active">About</a></li>
+      <li><a href="products.html">Products</a></li>
+      <li><a href="gallery.html">Gallery</a></li>
+      <li><a href="heavy.html">Heavy Page</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    <section class="page-header">
+      <h1>About VitalSage</h1>
+      <p class="lead">An open-source SDK for measuring and analysing browser performance metrics.</p>
+    </section>
+
+    <!-- Navigation test: clicking these links should trigger a fresh set of metrics -->
+    <section class="content-block">
+      <h2>What Does VitalSage Measure?</h2>
+      <p>
+        VitalSage wraps the <a href="https://github.com/GoogleChrome/web-vitals" target="_blank">web-vitals</a>
+        library and adds session-level context: device category, network conditions, route path, and
+        optional trace data captured via CDP.
+      </p>
+      <ul class="feature-list">
+        <li><strong>LCP</strong> — Largest Contentful Paint: when the biggest visible element renders.</li>
+        <li><strong>FCP</strong> — First Contentful Paint: first pixel of text or image.</li>
+        <li><strong>TTFB</strong> — Time to First Byte: server response latency.</li>
+        <li><strong>CLS</strong> — Cumulative Layout Shift: visual stability score.</li>
+        <li><strong>INP</strong> — Interaction to Next Paint: responsiveness to user input.</li>
+      </ul>
+    </section>
+
+    <section class="content-block">
+      <h2>Navigation Test</h2>
+      <p>
+        Navigate between pages and watch the debug panel reset. Each page view creates a new session.
+        After you leave this page the session report is flushed and sent to the server.
+      </p>
+      <div class="nav-test-links">
+        <a href="index.html" class="btn btn-secondary">← Back to Home</a>
+        <a href="products.html" class="btn btn-primary">Products →</a>
+      </div>
+    </section>
+
+    <section class="content-block">
+      <h2>Storage Adapters</h2>
+      <p>
+        This demo wires up two adapters:
+      </p>
+      <ol>
+        <li>
+          <strong>IndexedDB</strong> — each session report is written to the
+          <code>vitalsage</code> database, <code>sessions</code> store.
+          Open DevTools → Application → IndexedDB to inspect.
+        </li>
+        <li>
+          <strong>Express server</strong> — session reports are POSTed to
+          <code>http://localhost:3001/api/session</code> and saved as
+          JSON files under <code>examples/server/data/</code>.
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <script type="module" src="./vitalsage-init.js"></script>
+</body>
+</html>

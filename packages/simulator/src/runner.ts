@@ -89,22 +89,19 @@ export class PlaywrightSimulator {
       hasTouch:          vp.hasTouch,
     });
 
-    // Network emulation via CDP
-    const tempPage = await context.newPage();
-    const cdp      = await context.newCDPSession(tempPage);
-    await cdp.send('Network.enable');
-    await cdp.send('Network.emulateNetworkConditions', NETWORK_PROFILES[run.network]);
-    await cdp.detach();
-    await tempPage.close();
-
     const page = await context.newPage();
-    let perfCdp: CDPSession | undefined;
+    // Single CDP session kept open for the whole run:
+    // – network throttling (must stay open or Chrome reverts conditions on detach)
+    // – performance counters (when captureTrace)
+    let mainCdp: CDPSession | undefined;
     try {
       await page.addInitScript({ content: INJECTOR_SCRIPT });
 
+      mainCdp = await context.newCDPSession(page);
+      await mainCdp.send('Network.enable');
+      await mainCdp.send('Network.emulateNetworkConditions', NETWORK_PROFILES[run.network]);
       if (config.captureTrace) {
-        perfCdp = await context.newCDPSession(page);
-        await perfCdp.send('Performance.enable');
+        await mainCdp.send('Performance.enable');
       }
 
       const url = run.route === '/'
@@ -116,9 +113,9 @@ export class PlaywrightSimulator {
       // Snapshot immediately at networkidle so that timing counters, TBT, and
       // long tasks all reflect the same load-phase window (comparable to DevTools).
       let loadPhase: LoadPhaseSnapshot | undefined;
-      if (config.captureTrace && perfCdp) {
+      if (config.captureTrace && mainCdp) {
         const [{ metrics }, longTasks] = await Promise.all([
-          perfCdp.send('Performance.getMetrics') as Promise<{ metrics: Array<{ name: string; value: number }> }>,
+          mainCdp.send('Performance.getMetrics') as Promise<{ metrics: Array<{ name: string; value: number }> }>,
           page.evaluate(() => {
             type E = { startTime: number; duration: number; blocking: number };
             const s = (window as unknown as { __vitalsage_session?: { longTasks?: E[] } }).__vitalsage_session;
@@ -153,13 +150,13 @@ export class PlaywrightSimulator {
 
       return await extractSessionReport(
         page, url, run.network, run.viewport, generateId(),
-        config.captureTrace ?? false, perfCdp, screenshot, loadPhase,
+        config.captureTrace ?? false, mainCdp, screenshot, loadPhase,
       );
     } catch (err) {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);
       return null;
     } finally {
-      await perfCdp?.detach().catch(() => {});
+      await mainCdp?.detach().catch(() => {});
       await context.close().catch(() => {});
     }
   }
