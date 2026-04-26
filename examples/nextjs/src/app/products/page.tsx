@@ -71,7 +71,7 @@ export default function ProductsPage() {
       </div>
 
       {products === null ? (
-        <div className="spinner-container" aria-live="polite">
+        <div className="spinner-container" data-loading aria-live="polite">
           <div className="spinner" role="status" aria-label="Loading products…" />
           <p>Loading products…</p>
         </div>

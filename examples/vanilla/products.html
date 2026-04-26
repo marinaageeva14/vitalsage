@@ -36,7 +36,7 @@
     </div>
 
     <!-- Spinner shown while data loads -->
-    <div id="loading-state" class="spinner-container" aria-live="polite">
+    <div id="loading-state" class="spinner-container" data-loading aria-live="polite">
       <div class="spinner" role="status" aria-label="Loading products…"></div>
       <p>Loading products…</p>
     </div>
@@ -106,6 +106,9 @@
       const filters = document.getElementById('filter-bar');
 
       // Replace spinner with grid  →  intentional layout shift
+      // Remove data-loading BEFORE hiding so the settle observer sees the
+      // attribute disappear and the settle timer is free to complete.
+      spinner.removeAttribute('data-loading');
       spinner.classList.add('hidden');
       grid.innerHTML = products.map(renderProduct).join('');
       grid.classList.remove('hidden');

@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx serve . -p 5173 --cors"
+    "dev": "vite --port 5173"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
   }
 }
