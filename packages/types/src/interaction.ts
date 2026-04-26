@@ -1,4 +1,4 @@
-import type { DeviceContext } from './context.js';
+import type { DeviceContext, PageContext } from './context.js';
 import type { MetricName, MetricRating } from './metrics.js';
 
 export type InteractionType   = 'INITIAL_LOAD' | 'NAVIGATION';
@@ -31,4 +31,15 @@ export interface Interaction {
   device:    DeviceContext;
   timestamp: number;           // Unix ms when interaction started
   duration:  number;           // ms from start to completion
+  /**
+   * Page context captured at interaction completion time — resources, scripts,
+   * images, fonts, LCP element descriptor, and navigation timing.
+   *
+   * Present on success / fail / timeout interactions. Absent on `cancel`
+   * (rapid navigation away before the page settled — DOM is already in transition).
+   *
+   * This is the same shape as PageContext in SessionReport, so the analysis
+   * engine receives equally rich data from real users and synthetic simulation.
+   */
+  page?:     PageContext;
 }

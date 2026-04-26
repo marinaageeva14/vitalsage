@@ -55,6 +55,14 @@ export interface SimulatorConfig {
   waitAfterLoad?:     number;
   interactAfterLoad?: boolean;
   captureTrace?:      boolean;
+  /**
+   * Capture the full CPU profiler trace (disabled-by-default-v8.cpu_profiler).
+   * Produces per-function call stacks — the same data that powers the DevTools
+   * flame chart. Significantly increases trace size (~50 MB per run) and
+   * adds ~10–15 % CPU overhead during recording.
+   * Only meaningful when captureTrace is also true.
+   */
+  captureFullTrace?:  boolean;
   outputDir:          string;
   concurrency?:       number;
   delayBetweenRuns?:  number;  // ms to wait between batch chunks

@@ -6,9 +6,11 @@ import type {
   MetricSnapshot,
   MetricRating,
   RawMetricValue,
+  SerializablePerformanceEntry,
   StorageAdapter,
 } from '@vitalsage/types';
-import { generateId } from '../utils/id.js';
+import { generateId }      from '../utils/id.js';
+import { ContextCollector } from '../collector/context.js';
 
 // Inlined to avoid a runtime import from the types-only @vitalsage/types package.
 const THRESHOLDS: Record<MetricName, { good: number; poor: number }> = {
@@ -47,6 +49,11 @@ interface ActiveInteraction {
    * Initialised to startPerfTime so the first settle poll always waits SETTLE_MS.
    */
   lastMutationAt: number;
+  /**
+   * Raw serialised LCP entries from web-vitals — kept so ContextCollector can
+   * identify the LCP element (tag, src, fetchpriority, etc.) at completion time.
+   */
+  lcpEntries:     SerializablePerformanceEntry[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -75,8 +82,9 @@ export class InteractionTracker {
   private settleObserver: MutationObserver  | null = null;
 
   constructor(
-    private readonly adapter: StorageAdapter,
-    private readonly device:  DeviceContext,
+    private readonly adapter:   StorageAdapter,
+    private readonly device:    DeviceContext,
+    private readonly ctxCollector: ContextCollector,
   ) {}
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -113,6 +121,9 @@ export class InteractionTracker {
         if (value <= c.startPerfTime) return;
         c.metrics.LCP = { value, rating };
         c.hasLCP = true;
+        // Keep the raw entries so ContextCollector can find the LCP element
+        // (tag, src, fetchpriority, preload status) at completion time.
+        c.lcpEntries = metric.entries;
         // LCP fired — kick off the settle check immediately. If the DOM is already
         // quiet the timer will fire in 200 ms; any subsequent mutation resets it.
         this.scheduleSettle(c);
@@ -175,6 +186,7 @@ export class InteractionTracker {
       clsBaseline,
       inpBaseline,
       lastMutationAt: startPerfTime,
+      lcpEntries:     [],
     };
   }
 
@@ -234,6 +246,18 @@ export class InteractionTracker {
 
     const status: InteractionStatus = c.status === 'fail' ? 'fail' : triggerStatus;
 
+    // Collect page context for all completed interactions except `cancel`.
+    // `cancel` means a new route started before this one settled — the DOM is
+    // already transitioning, so collected context would reflect the new page.
+    let page: ReturnType<ContextCollector['collect']> | undefined;
+    if (status !== 'cancel') {
+      try {
+        page = this.ctxCollector.collect(c.lcpEntries);
+      } catch {
+        // Collection failure is non-fatal — proceed without page context.
+      }
+    }
+
     const interaction: Interaction = {
       id:        c.id,
       type:      c.type,
@@ -244,6 +268,7 @@ export class InteractionTracker {
       device:    this.device,
       timestamp: c.timestamp,
       duration:  Math.round(performance.now() - c.startPerfTime),
+      ...(page ? { page } : {}),
     };
 
     safeCall(() => this.adapter.onInteraction?.(interaction));

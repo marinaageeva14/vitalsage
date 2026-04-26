@@ -2,11 +2,11 @@
   "name": "vitalsage-monorepo",
   "private": true,
   "scripts": {
-    "build":     "pnpm -r run build",
-    "test":      "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck",
-    "lint":      "pnpm -r run lint",
-    "clean":     "pnpm -r run clean",
+    "build":     "pnpm --filter './packages/**' -r run build",
+    "test":      "pnpm --filter './packages/**' -r run test",
+    "typecheck": "pnpm --filter './packages/**' -r run typecheck",
+    "lint":      "pnpm --filter './packages/**' -r run lint",
+    "clean":     "pnpm --filter './packages/**' -r run clean",
     "changeset": "changeset",
     "version":   "changeset version",
     "publish":   "changeset publish"

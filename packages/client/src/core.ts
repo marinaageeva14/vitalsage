@@ -1,6 +1,7 @@
 import type { ClientConfig } from '@vitalsage/types';
 import { collectDeviceContext }   from './collector/device.js';
 import { MetricsCollector }       from './collector/metrics.js';
+import { ContextCollector }       from './collector/context.js';
 import { NavigationObserver }     from './routing/observer.js';
 import { InteractionTracker }     from './interaction/tracker.js';
 
@@ -27,8 +28,9 @@ export function init(config: ClientConfig): VitalSageInstance {
 
   const device      = collectDeviceContext();
   const metricsCol  = new MetricsCollector();
+  const ctxCol      = new ContextCollector();
   const navObserver = new NavigationObserver(config.navigation?.mode ?? 'auto');
-  const tracker     = new InteractionTracker(config.storage.adapter, device);
+  const tracker     = new InteractionTracker(config.storage.adapter, device, ctxCol);
 
   // Wire metrics → tracker
   metricsCol.subscribe(metric => tracker.onMetric(metric));

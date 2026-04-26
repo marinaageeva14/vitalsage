@@ -6,6 +6,7 @@ import type { SimulatorConfig, SessionReport, NetworkProfile, ViewportProfile } 
 import { INJECTOR_SCRIPT }        from './injector.js';
 import { NETWORK_PROFILES, VIEWPORT_PROFILES } from './profiles.js';
 import { extractSessionReport }   from './extractor.js';
+import { parseFunctionsFromProfile, parseScriptsFromProfile, type CpuProfileData } from './trace-parser.js';
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -90,31 +91,59 @@ export class PlaywrightSimulator {
     });
 
     const page = await context.newPage();
-    // Single CDP session kept open for the whole run:
-    // – network throttling (must stay open or Chrome reverts conditions on detach)
-    // – performance counters (when captureTrace)
-    let mainCdp: CDPSession | undefined;
+    // Single page-level CDP session for network throttling, Performance.getMetrics,
+    // and the V8 Profiler domain.
+    //
+    // NOTE: We intentionally do NOT use CDP Tracing.start/stop — Playwright
+    // intercepts the Tracing domain internally (for context.tracing) and blocks
+    // external use: Tracing.start silently no-ops and Tracing.stop returns
+    // "Tracing.stop wasn't found". The Profiler domain gives the same V8 CPU
+    // sample data and works correctly on page-level CDP sessions.
+    let mainCdp:       CDPSession | undefined;
+    let profilerStarted = false;  // hoisted so finally block can clean up on early throw
     try {
       await page.addInitScript({ content: INJECTOR_SCRIPT });
 
       mainCdp = await context.newCDPSession(page);
       await mainCdp.send('Network.enable');
       await mainCdp.send('Network.emulateNetworkConditions', NETWORK_PROFILES[run.network]);
+
       if (config.captureTrace) {
         await mainCdp.send('Performance.enable');
+        await mainCdp.send('Profiler.enable');
+
+        // Set sampling interval:
+        //   captureFullTrace → 1000 µs (1 ms, same default as Chrome DevTools)
+        //   captureTrace only → 5000 µs (5 ms, lower overhead for routine runs)
+        await mainCdp.send('Profiler.setSamplingInterval', {
+          interval: config.captureFullTrace ? 1000 : 5000,
+        });
+
+        await mainCdp.send('Profiler.start');
+        profilerStarted = true;
       }
 
       const url = run.route === '/'
         ? config.url
         : config.url.replace(/\/$/, '') + run.route;
 
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+      // Try networkidle first (best measurement window). Many production sites
+      // with persistent XHR/WebSocket connections never reach networkidle, so we
+      // fall back to 'load' + a short networkidle grace period on timeout.
+      try {
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      } catch {
+        await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+        // Give the page a short window to settle after load before we snapshot.
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+      }
 
-      // Snapshot immediately at networkidle so that timing counters, TBT, and
-      // long tasks all reflect the same load-phase window (comparable to DevTools).
+      // Stop profiler and snapshot Performance.getMetrics at the same settled point
+      // so both data sources reflect the same load phase window.
       let loadPhase: LoadPhaseSnapshot | undefined;
-      if (config.captureTrace && mainCdp) {
-        const [{ metrics }, longTasks] = await Promise.all([
+      if (config.captureTrace && mainCdp && profilerStarted) {
+        const [profilerResult, { metrics }, longTasks] = await Promise.all([
+          mainCdp.send('Profiler.stop') as Promise<{ profile: CpuProfileData }>,
           mainCdp.send('Performance.getMetrics') as Promise<{ metrics: Array<{ name: string; value: number }> }>,
           page.evaluate(() => {
             type E = { startTime: number; duration: number; blocking: number };
@@ -122,9 +151,17 @@ export class PlaywrightSimulator {
             return s?.longTasks ? [...s.longTasks] as E[] : [] as E[];
           }),
         ]);
+        profilerStarted = false;
+
+        const profile      = profilerResult.profile;
+        const topScripts   = parseScriptsFromProfile(profile);
+        const topFunctions = config.captureFullTrace ? parseFunctionsFromProfile(profile) : undefined;
+
         loadPhase = {
-          metrics:   Object.fromEntries(metrics.map(m => [m.name, m.value])),
+          metrics:  Object.fromEntries(metrics.map(m => [m.name, m.value])),
           longTasks,
+          topScripts,
+          ...(topFunctions ? { topFunctions } : {}),
         };
       }
 
@@ -156,6 +193,11 @@ export class PlaywrightSimulator {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);
       return null;
     } finally {
+      // If the run threw before Profiler.stop was called, stop it now so the
+      // profiler doesn't keep running and leaking memory into subsequent runs.
+      if (profilerStarted && mainCdp) {
+        await mainCdp.send('Profiler.stop').catch(() => {});
+      }
       await mainCdp?.detach().catch(() => {});
       await context.close().catch(() => {});
     }

@@ -1,5 +1,5 @@
 import type { Page, CDPSession } from 'playwright';
-import type { TraceMetrics, LongTask } from '@vitalsage/types';
+import type { TraceMetrics, LongTask, ScriptActivity, FunctionProfile } from '@vitalsage/types';
 
 interface CDPMetric { name: string; value: number }
 
@@ -18,8 +18,12 @@ interface PageMetrics {
 }
 
 export interface LoadPhaseSnapshot {
-  metrics:   Record<string, number>;
-  longTasks: Array<{ startTime: number; duration: number; blocking: number }>;
+  metrics:    Record<string, number>;
+  longTasks:  Array<{ startTime: number; duration: number; blocking: number }>;
+  /** Per-script execution time extracted from CDP trace events. */
+  topScripts?:   ScriptActivity[];
+  /** Per-function CPU profile (only when captureFullTrace: true). */
+  topFunctions?: FunctionProfile[];
 }
 
 // cdpSession must have had Performance.enable called BEFORE page.goto().
@@ -89,6 +93,17 @@ export async function collectTraceMetrics(
   const heapUsed = pageMetrics.JSHeapUsedSize;
   if (heapUsed !== undefined) {
     result.jsHeapUsed = Math.round(heapUsed / 1024 / 1024);
+  }
+
+  // Attach per-script breakdown from CDP trace events (only present when
+  // Tracing.start/stop was used — i.e. loadPhase was provided by runner.ts).
+  if (loadPhase?.topScripts && loadPhase.topScripts.length > 0) {
+    result.topScripts = loadPhase.topScripts;
+  }
+
+  // Attach per-function CPU profile (only present with captureFullTrace: true).
+  if (loadPhase?.topFunctions && loadPhase.topFunctions.length > 0) {
+    result.topFunctions = loadPhase.topFunctions;
   }
 
   return result;

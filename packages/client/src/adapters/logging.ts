@@ -102,6 +102,30 @@ export function createLoggingAdapter(options: LoggingAdapterOptions = {}): Stora
       console.log('duration :', `${duration}ms`);
       console.log('time     :', new Date(timestamp).toISOString());
 
+      // ── Page context summary ───────────────────────────────────────
+      if (interaction.page) {
+        const p = interaction.page;
+        const blocking = p.scripts.filter(s => s.isRenderBlocking).length;
+        console.log(
+          'page     :',
+          `${p.domNodeCount} nodes · ${p.resources.length} resources · ` +
+          `${p.scripts.length} scripts (${blocking} render-blocking) · ` +
+          `${p.images.length} images · ${p.fonts.length} fonts`,
+        );
+        if (p.lcpElement) {
+          const el = p.lcpElement;
+          const hints: string[] = [];
+          if (el.elementType === 'img' && !el.fetchPriority) hints.push('no fetchpriority');
+          if (!el.isPreloaded) hints.push('not preloaded');
+          if (el.isThirdParty)  hints.push('third-party');
+          console.log(
+            'lcp el   :',
+            `<${el.tagName.toLowerCase()}>${el.src ? ' ' + el.src.replace(/^https?:\/\/[^/]+/, '') : ''}` +
+            (hints.length ? `  ⚠ ${hints.join(', ')}` : '  ✓'),
+          );
+        }
+      }
+
       if (verbose) {
         console.log('--- raw ---');
         console.log(interaction);

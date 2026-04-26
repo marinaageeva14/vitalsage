@@ -97,6 +97,9 @@ Options (trace):
   --network      Network profile: wifi 4g 3g slow-2g (default: 4g)
   --viewport     Viewport profile: desktop tablet mobile (default: desktop)
   --delay        Ms to wait between runs (default: 2000)
+  --full-report  Enable V8 CPU profiler for per-function flame chart data.
+                 Same data source as Chrome DevTools Performance tab.
+                 Warning: adds ~10–15% overhead and produces larger traces.
   --output       Save report to file (.html or .json); default: report-YYYY-MM-DD.html
   --ai-provider  AI provider: anthropic | openai | gemini
   --ai-key       API key for AI provider
@@ -171,16 +174,18 @@ async function main(): Promise<void> {
   if (cmd === 'trace') {
     const url = getString(args, 'url');
     if (!url) { printError('--url is required'); process.exit(1); }
-    const aiProvider = getString(args, 'aiProvider');
-    const aiKey      = getString(args, 'aiKey');
-    const aiModel    = getString(args, 'aiModel');
-    const output     = getString(args, 'output');
+    const aiProvider  = getString(args, 'aiProvider');
+    const aiKey       = getString(args, 'aiKey');
+    const aiModel     = getString(args, 'aiModel');
+    const output      = getString(args, 'output');
+    const fullReport  = args.get('fullReport') === true || args.get('fullReport') === 'true';
     await runTrace({
       url,
       runs:     getNumber(args, 'runs', 3),
       network:  getString(args, 'network')  ?? '4g',
       viewport: getString(args, 'viewport') ?? 'desktop',
       delay:    getNumber(args, 'delay', 2000),
+      fullReport,
       ...(aiProvider ? { aiProvider } : {}),
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),
