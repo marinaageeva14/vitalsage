@@ -39,12 +39,20 @@ export default function ProductsPage() {
   const [addedIds,       setAddedIds]       = useState<Set<number>>(new Set());
   const [filtersVisible, setFiltersVisible] = useState(false);
 
+  // Simulate async fetch with 1.5 s delay.
+  // data-loading is managed imperatively so it never appears in SSR HTML —
+  // useEffect only runs on the client, preventing hydration attribute mismatches.
   useEffect(() => {
+    document.body.setAttribute('data-loading', '');
     const t = setTimeout(() => {
+      document.body.removeAttribute('data-loading');
       setProducts(PRODUCTS);
       setTimeout(() => setFiltersVisible(true), 200);
     }, 1500);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      document.body.removeAttribute('data-loading');
+    };
   }, []);
 
   function addToCart(id: number) {
@@ -71,7 +79,7 @@ export default function ProductsPage() {
       </div>
 
       {products === null ? (
-        <div className="spinner-container" data-loading aria-live="polite">
+        <div className="spinner-container" aria-live="polite">
           <div className="spinner" role="status" aria-label="Loading products…" />
           <p>Loading products…</p>
         </div>

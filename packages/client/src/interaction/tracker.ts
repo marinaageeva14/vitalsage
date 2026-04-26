@@ -214,7 +214,11 @@ export class InteractionTracker {
       if (c.type === 'INITIAL_LOAD' && !c.hasLCP) return;
 
       // Block if any element is still explicitly marked as loading.
-      if (document.querySelector('[data-loading]')) return;
+      // Re-arm the poll — don't bail permanently; loading will finish eventually.
+      if (document.querySelector('[data-loading]')) {
+        this.scheduleSettle(c);
+        return;
+      }
 
       this.completeInteraction('success');
     }, delay);
