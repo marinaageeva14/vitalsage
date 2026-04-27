@@ -2,6 +2,7 @@ import { runSimulate } from './commands/simulate.js';
 import { runAnalyze }  from './commands/analyze.js';
 import { runReport }   from './commands/report.js';
 import { runTrace }    from './commands/trace.js';
+import { runCapture }  from './commands/capture.js';
 import { printError }  from './output/terminal.js';
 
 function parseArgs(argv: string[]): Map<string, string | string[] | boolean> {
@@ -60,12 +61,14 @@ Usage:
   vitalsage analyze  --sessions <dir> [options]
   vitalsage report   --input <file> --output <file>
   vitalsage trace    --url <url> [options]
+  vitalsage capture  <url> [options]
 
 Commands:
   simulate    Run synthetic sessions using Playwright
   analyze     Analyze sessions and generate suggestions
   report      Generate HTML report from saved analysis JSON
   trace       Capture and analyze a performance trace on-demand
+  capture     Enrich a stored real-user interaction with a CDP flame-graph trace
 
 Options (simulate):
   --url         URL to simulate (required)
@@ -101,6 +104,28 @@ Options (trace):
                  Same data source as Chrome DevTools Performance tab.
                  Warning: adds ~10–15% overhead and produces larger traces.
   --output       Save report to file (.html or .json); default: report-YYYY-MM-DD.html
+  --ai-provider  AI provider: anthropic | openai | gemini
+  --ai-key       API key for AI provider
+  --ai-model     Model name override
+
+Commands (capture):
+  vitalsage capture <url> [options]
+
+  Enriches a stored real-user interaction on the VitalSage server with a
+  CDP-based flame-graph trace captured via Playwright.  Combines real CWV
+  distributions (p75 LCP, CLS, INP…) with trace-derived main-thread data
+  for deeper analysis.
+
+Options (capture):
+  --url          URL to capture (positional or --url)
+  --server       VitalSage server base URL (default: http://localhost:3001)
+  --app          App name filter when fetching interactions (default: unknown)
+  --runs         Number of Playwright trace runs to average (default: 3)
+  --network      Network throttle profile: wifi 4g 3g slow-2g (default: 4g)
+  --viewport     Viewport profile: desktop tablet mobile (default: desktop)
+  --full-report  Capture per-function flame chart (V8 CPU Profiler, higher overhead)
+  --output       Save HTML/JSON report to file
+  --no-server    Skip server fetch/patch — analyse trace-only sessions
   --ai-provider  AI provider: anthropic | openai | gemini
   --ai-key       API key for AI provider
   --ai-model     Model name override
@@ -186,6 +211,38 @@ async function main(): Promise<void> {
       viewport: getString(args, 'viewport') ?? 'desktop',
       delay:    getNumber(args, 'delay', 2000),
       fullReport,
+      ...(aiProvider ? { aiProvider } : {}),
+      ...(aiKey      ? { aiKey }      : {}),
+      ...(aiModel    ? { aiModel }    : {}),
+      ...(output     ? { output }     : {}),
+    });
+    return;
+  }
+
+  if (cmd === 'capture') {
+    // Positional: `vitalsage capture https://example.com` OR `--url https://example.com`
+    const positionalUrl = rest.find(a => !a.startsWith('--'));
+    const url = getString(args, 'url') ?? positionalUrl;
+    if (!url) { printError('URL is required — e.g. vitalsage capture https://example.com'); process.exit(1); }
+    const aiProvider = getString(args, 'aiProvider');
+    const aiKey      = getString(args, 'aiKey');
+    const aiModel    = getString(args, 'aiModel');
+    const output     = getString(args, 'output');
+    const server     = getString(args, 'server');
+    const app        = getString(args, 'app');
+    const network    = getString(args, 'network');
+    const viewport   = getString(args, 'viewport');
+    const fullReport = args.get('fullReport') === true || args.get('fullReport') === 'true';
+    const noServer   = args.get('noServer')   === true || args.get('noServer')   === 'true';
+    await runCapture({
+      url,
+      runs:     getNumber(args, 'runs', 3),
+      fullReport,
+      noServer,
+      ...(server     ? { server }     : {}),
+      ...(app        ? { app }        : {}),
+      ...(network    ? { network }    : {}),
+      ...(viewport   ? { viewport }   : {}),
       ...(aiProvider ? { aiProvider } : {}),
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),

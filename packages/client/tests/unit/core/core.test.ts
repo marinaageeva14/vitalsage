@@ -60,20 +60,48 @@ describe('init()', () => {
     // sampling=0 never starts a real instance, so stop() call is safe (no activeInstance set)
   });
 
-  it('onReport fires when pagehide event dispatched', () => {
-    const onReport = vi.fn();
-    const adapter: StorageAdapter = { onReport };
+  it('onInteraction fires when pagehide event dispatched', () => {
+    const onInteraction = vi.fn();
+    const adapter: StorageAdapter = { onInteraction };
     const instance = init(makeConfig({ storage: { adapter } }));
 
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
 
-    expect(onReport).toHaveBeenCalledOnce();
-    const report = onReport.mock.calls[0][0];
-    expect(report).toHaveProperty('sessionId');
-    expect(report).toHaveProperty('visitId');
-    expect(report).toHaveProperty('route');
-    expect(report.synthetic).toBe(false);
-    expect(report.sdkVersion).toBe('__VERSION__');
+    expect(onInteraction).toHaveBeenCalledOnce();
+    const interaction = onInteraction.mock.calls[0][0];
+    expect(interaction).toHaveProperty('id');
+    expect(interaction).toHaveProperty('type');
+    expect(interaction).toHaveProperty('status');
+    expect(interaction.type).toBe('INITIAL_LOAD');
+    expect(interaction.status).toBe('success');
+
+    instance.stop();
+  });
+
+  it('page.traceMetrics is included when longtask observer is supported', () => {
+    const onInteraction = vi.fn();
+    const adapter: StorageAdapter = { onInteraction };
+
+    // Simulate PerformanceObserver support for longtask
+    const mockObserver = vi.fn().mockImplementation(() => ({
+      observe: vi.fn(),
+      disconnect: vi.fn(),
+    }));
+    mockObserver.supportedEntryTypes = ['longtask'];
+    vi.stubGlobal('PerformanceObserver', mockObserver);
+
+    const instance = init(makeConfig({ storage: { adapter } }));
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+
+    expect(onInteraction).toHaveBeenCalledOnce();
+    const interaction = onInteraction.mock.calls[0][0];
+    // page should be present (status is success)
+    expect(interaction.page).toBeDefined();
+    // traceMetrics present because observer was active
+    expect(interaction.page?.traceMetrics).toBeDefined();
+    expect(interaction.page?.traceMetrics).toHaveProperty('totalBlockingTime');
+    expect(interaction.page?.traceMetrics).toHaveProperty('longTaskCount');
+    expect(interaction.page?.traceMetrics).toHaveProperty('domNodes');
 
     instance.stop();
   });

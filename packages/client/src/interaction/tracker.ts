@@ -9,8 +9,9 @@ import type {
   SerializablePerformanceEntry,
   StorageAdapter,
 } from '@vitalsage/types';
-import { generateId }      from '../utils/id.js';
-import { ContextCollector } from '../collector/context.js';
+import { generateId }         from '../utils/id.js';
+import { ContextCollector }   from '../collector/context.js';
+import { LongTaskCollector }  from '../collector/longtask.js';
 
 // Inlined to avoid a runtime import from the types-only @vitalsage/types package.
 const THRESHOLDS: Record<MetricName, { good: number; poor: number }> = {
@@ -82,9 +83,10 @@ export class InteractionTracker {
   private settleObserver: MutationObserver  | null = null;
 
   constructor(
-    private readonly adapter:   StorageAdapter,
-    private readonly device:    DeviceContext,
-    private readonly ctxCollector: ContextCollector,
+    private readonly adapter:       StorageAdapter,
+    private readonly device:        DeviceContext,
+    private readonly ctxCollector:  ContextCollector,
+    private readonly ltCollector:   LongTaskCollector,
   ) {}
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -171,6 +173,7 @@ export class InteractionTracker {
     inpBaseline:   number,
     startPerfTime: number,
   ): void {
+    this.ltCollector.reset(startPerfTime);
     this.current = {
       id:             generateId(),
       type,
@@ -252,7 +255,9 @@ export class InteractionTracker {
     let page: ReturnType<ContextCollector['collect']> | undefined;
     if (status !== 'cancel') {
       try {
-        page = this.ctxCollector.collect(c.lcpEntries);
+        const ctx          = this.ctxCollector.collect(c.lcpEntries);
+        const traceMetrics = this.ltCollector.collect(ctx.domNodeCount);
+        page = traceMetrics ? { ...ctx, traceMetrics } : ctx;
       } catch {
         // Collection failure is non-fatal — proceed without page context.
       }

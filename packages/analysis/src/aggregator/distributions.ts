@@ -23,7 +23,7 @@ export function computeDistributions(
       .map(s => s.metrics[name]?.value)
       .filter((v): v is number => typeof v === 'number' && isFinite(v));
 
-    if (values.length < 1) continue;
+    if (values.length < 5) continue;
 
     result[name] = buildDistribution(values, name, thresholds[name], sessions);
   }

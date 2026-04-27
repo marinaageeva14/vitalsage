@@ -10,7 +10,8 @@
   "dependencies": {
     "better-sqlite3": "^9.6.0",
     "cors":           "^2.8.5",
-    "express":        "^4.19.0"
+    "express":        "^4.19.0",
+    "vitalsage-analysis": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",

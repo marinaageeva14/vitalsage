@@ -1,49 +1,987 @@
 # VitalSage
 
-AI-assisted web performance optimization — drop-in SDK for any website.
+Open-source browser performance SDK with AI-powered analysis. Captures real-user Core Web Vitals, main-thread traces, and page context — then routes findings through rule-based agents and an optional LLM for actionable suggestions.
 
-## Packages
+```
+Browser SDK (vitalsage)
+  └─ captures CWV + long tasks + page context
+  └─ posts Interaction to your server
 
-| Package | Description |
-|---------|-------------|
-| [`vitalsage`](packages/client) | Browser SDK — collects Core Web Vitals |
-| [`vitalsage-analysis`](packages/analysis) | Server-side analysis engine with AI suggestions |
-| [`vitalsage-simulator`](packages/simulator) | Playwright synthetic runner |
-| [`vitalsage-cli`](packages/cli) | `npx vitalsage` CLI |
-| [`@vitalsage/types`](packages/types) | Shared TypeScript types (zero runtime) |
+Example Server (examples/server)
+  └─ stores interactions in SQLite
+  └─ /api/audit streams AnalysisReport per route via SSE
+
+CLI (vitalsage-cli)
+  └─ simulate   → synthetic Playwright runs
+  └─ analyze    → off-line analysis from JSON files
+  └─ trace      → on-demand CDP flame-graph
+  └─ capture    → enriches real sessions with a trace
+  └─ report     → regenerate HTML from saved JSON
+```
+
+---
+
+## Table of Contents
+
+1. [Monorepo Structure](#monorepo-structure)
+2. [Quick Start](#quick-start)
+3. [Browser SDK — `vitalsage`](#browser-sdk--vitalsage)
+   - [Installation](#installation)
+   - [init()](#init)
+   - [ClientConfig](#clientconfig)
+   - [StorageAdapter](#storageadapter)
+   - [Adapters](#adapters)
+   - [Interaction shape](#interaction-shape)
+   - [PageContext](#pagecontext)
+   - [TraceMetrics (browser-collected)](#tracemetrics-browser-collected)
+4. [Example Server](#example-server)
+   - [Endpoints](#endpoints)
+   - [AI audit via SSE](#ai-audit-via-sse)
+5. [CLI — `vitalsage`](#cli--vitalsage)
+   - [simulate](#simulate)
+   - [analyze](#analyze)
+   - [trace](#trace)
+   - [capture](#capture)
+   - [report](#report)
+6. [Analysis Engine — `vitalsage-analysis`](#analysis-engine--vitalsage-analysis)
+   - [Agents](#agents)
+   - [Metric thresholds](#metric-thresholds)
+   - [Trace agent thresholds](#trace-agent-thresholds)
+7. [Simulator — `vitalsage-simulator`](#simulator--vitalsage-simulator)
+8. [Framework Integration Examples](#framework-integration-examples)
+   - [Vanilla JS / HTML](#vanilla-js--html)
+   - [React](#react)
+   - [Next.js](#nextjs)
+9. [Development](#development)
+
+---
+
+## Monorepo Structure
+
+```
+vitalsage/
+├── packages/
+│   ├── client/        vitalsage            Browser SDK (ESM, CJS, IIFE)
+│   ├── analysis/      vitalsage-analysis   Analysis engine + 9 agents + AI
+│   ├── simulator/     vitalsage-simulator  Playwright synthetic runner
+│   ├── cli/           vitalsage-cli        CLI tool (globally linked)
+│   └── types/         @vitalsage/types     Shared TypeScript types
+└── examples/
+    ├── vanilla/        Multi-page HTML demo
+    ├── react/          React + React Router demo
+    ├── nextjs/         Next.js 14 App Router demo
+    └── server/         Express + SQLite collection server
+```
+
+---
 
 ## Quick Start
 
 ```bash
-npm install vitalsage
+# 1. Install dependencies
+pnpm install
+
+# 2. Build all packages
+pnpm build
+
+# 3. Start the collection server
+cd examples/server && pnpm dev
+# → http://localhost:3001
+
+# 4. Start an example app (in a new terminal)
+cd examples/vanilla && pnpm dev
+# → http://localhost:5173
+
+# 5. Browse the app — interactions are posted to the server automatically
+#    Open browser console to see VitalSage logging metrics in real time
+
+# 6. Run analysis over collected data
+curl "http://localhost:3001/api/audit?app=vanilla&minSamples=1"
 ```
+
+To enable AI-enhanced suggestions, set an API key before starting the server:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...   # Claude (recommended)
+# or
+export OPENAI_API_KEY=sk-...          # GPT-4o
+# or
+export GEMINI_API_KEY=...             # Gemini 1.5 Pro
+
+cd examples/server && pnpm dev
+```
+
+---
+
+## Browser SDK — `vitalsage`
+
+### Installation
+
+```bash
+npm install vitalsage
+# or
+pnpm add vitalsage
+```
+
+Peer dependency: `web-vitals >= 3.0.0`
+
+```bash
+npm install web-vitals
+```
+
+### init()
 
 ```typescript
 import { init } from 'vitalsage';
 
+const instance = init(config);
+
+// Later, to tear down (e.g. in tests):
+instance.stop();
+```
+
+`init()` is idempotent — calling it twice returns the existing instance and logs a warning when `debug: true`. Call `instance.stop()` first to reinitialise.
+
+### ClientConfig
+
+```typescript
+interface ClientConfig {
+  storage: {
+    adapter: StorageAdapter;
+  };
+
+  /**
+   * Fraction of sessions to instrument. Useful in high-traffic production.
+   * 1.0 = capture all (default), 0.1 = capture 10% at random.
+   */
+  sampling?: number;  // default: 1.0
+
+  /**
+   * Route patterns for custom SPA navigation matching.
+   * Not required for most apps — the SDK detects navigation automatically.
+   */
+  routes?: RouteConfig[];
+
+  /**
+   * Control how URL changes are detected as new interactions.
+   * 'auto'     - uses Navigation API when available, falls back to History API patching (default)
+   * 'pathname' - triggers only on pathname changes, ignores query string / hash
+   * 'custom'   - disables auto-detection; call instance navigation API manually
+   */
+  navigation?: {
+    mode: 'auto' | 'pathname' | 'custom';
+  };
+
+  /** Log extra diagnostic info to the console. default: false */
+  debug?: boolean;
+}
+```
+
+### StorageAdapter
+
+```typescript
+interface StorageAdapter {
+  /**
+   * Called once per completed interaction (page load or SPA navigation).
+   * Can be async — errors are caught and logged as warnings.
+   */
+  onInteraction?: (interaction: Interaction) => void | Promise<void>;
+}
+```
+
+A minimal server adapter:
+
+```typescript
+const serverAdapter: StorageAdapter = {
+  onInteraction: async (interaction) => {
+    await fetch('https://your-server.com/api/interaction', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ app: 'my-app', ...interaction }),
+    });
+  },
+};
+```
+
+### Adapters
+
+**`createLoggingAdapter(options?)`** — pretty-prints each interaction to the browser console.
+
+```typescript
+import { init, createLoggingAdapter } from 'vitalsage';
+
 init({
   storage: {
-    adapter: {
-      onReport: (report) => fetch('/api/perf', {
-        method: 'POST',
-        body: JSON.stringify(report),
-        keepalive: true,
-      }),
-    },
+    adapter: createLoggingAdapter({
+      label:   'my-app',  // shown in the group header
+      enabled: true,      // toggle without removing from chain (default: true)
+      verbose: false,     // also log the full interaction object (default: false)
+    }),
   },
 });
 ```
 
-## Development
-
-```bash
-pnpm install
-
-pnpm build
-pnpm test
-pnpm typecheck
+Output format:
+```
+▼ [VitalSage] my-app — INITIAL_LOAD ✅  1 234ms
+  🟢 LCP   1 450ms
+  🟢 FCP     820ms
+  🟢 TTFB    210ms
+  🟢 CLS   0.000
+  ⚪ INP       –
 ```
 
-## License
+**`composeAdapters(...adapters)`** — chains multiple adapters, called sequentially in order.
 
-MIT
+```typescript
+import { init, createLoggingAdapter, composeAdapters } from 'vitalsage';
+
+const serverAdapter    = { onInteraction: async (i) => { /* send to server    */ } };
+const analyticsAdapter = { onInteraction:       (i) => { /* send to analytics */ } };
+
+init({
+  storage: {
+    adapter: composeAdapters(
+      createLoggingAdapter({ label: 'app' }),  // 1st
+      serverAdapter,                            // 2nd
+      analyticsAdapter,                         // 3rd
+    ),
+  },
+});
+```
+
+### Interaction shape
+
+```typescript
+interface Interaction {
+  id:        string;            // Unique ID for this interaction
+  type:      'INITIAL_LOAD'     // Hard page load (or first load in SPA)
+           | 'NAVIGATION';      // SPA route change
+
+  status:    'success'          // Interaction completed normally
+           | 'cancel'           // New navigation before this one settled — page context absent
+           | 'timeout'          // 60-second hard timeout
+           | 'fail';            // [data-interaction-error] attribute detected
+
+  uri:       string;            // URL when interaction started
+  referrer:  string | null;     // document.referrer (INITIAL_LOAD) or previous URI (NAVIGATION)
+  timestamp: number;            // Unix ms when interaction started
+  duration:  number;            // ms from start to completion
+
+  metrics: {
+    LCP?:  { value: number; rating: 'good' | 'needs-improvement' | 'poor' };
+    FCP?:  { value: number; rating: '...' };
+    TTFB?: { value: number; rating: '...' };
+    CLS?:  { value: number; rating: '...' };
+    INP?:  { value: number; rating: '...' };
+  };
+
+  device: DeviceContext;   // Viewport, connection type, device category
+  page?:  PageContext;     // Present on success/fail/timeout; absent on cancel
+}
+```
+
+**Metric rating thresholds** (aligned with Google CrUX):
+
+| Metric | Good | Needs Improvement | Poor |
+|--------|------|-------------------|------|
+| LCP    | ≤ 2500ms | ≤ 4000ms | > 4000ms |
+| FCP    | ≤ 1800ms | ≤ 3000ms | > 3000ms |
+| TTFB   | ≤ 800ms  | ≤ 1800ms | > 1800ms |
+| CLS    | ≤ 0.1    | ≤ 0.25   | > 0.25   |
+| INP    | ≤ 200ms  | ≤ 500ms  | > 500ms  |
+
+### PageContext
+
+Collected at interaction completion (all statuses except `cancel`):
+
+```typescript
+interface PageContext {
+  url:          string;
+  referrer:     string;
+  title:        string;
+  domNodeCount: number;              // Total DOM nodes at completion
+
+  resources:        ResourceEntry[];       // Up to 250 resource timing entries
+  lcpElement?:      LCPElementDescriptor;  // Tag, src, fetchpriority, dimensions
+  fonts:            FontEntry[];           // @font-face declarations + preload status
+  images:           ImageEntry[];          // All <img> elements + above-fold/LCP markers
+  scripts:          ScriptEntry[];         // All <script> elements + render-blocking flags
+  stylesheets:      StylesheetEntry[];     // All <link rel="stylesheet"> elements
+  navigationTiming: NavigationTimingSnapshot; // DNS, TLS, server, parse, download times
+
+  traceMetrics?: TraceMetrics;   // Populated by LongTask/LoAF observers (no CDP needed)
+  screenshot?:   string;         // base64 JPEG — only on simulator captureTrace runs
+}
+```
+
+### TraceMetrics (browser-collected)
+
+The SDK uses two `PerformanceObserver` entry types to populate `TraceMetrics` in every real-user session — no Playwright or CDP required:
+
+| Entry type | Browser support | Provides |
+|---|---|---|
+| `longtask` | Chrome 58+, Firefox 82+, Edge 79+ | `longTasks[]`, `longTaskCount`, TBT (fallback), `mainThreadWork` (fallback) |
+| `long-animation-frame` (LoAF) | Chrome 123+ | Accurate `totalBlockingTime`, `mainThreadWork`, `scriptingTime`, `renderingTime`, `topScripts` |
+
+```typescript
+interface TraceMetrics {
+  totalBlockingTime:  number;        // ms of main-thread blocking (sum of task − 50ms portions)
+  longTaskCount:      number;        // count of tasks > 50ms
+  longTasks:          LongTask[];    // top-20 tasks: { startTime, duration, blocking }
+  mainThreadWork:     number;        // total CPU time on main thread (ms)
+  scriptingTime:      number;        // JS execution time (ms)
+  jsCompileTime:      number;        // JS parse + compile time (ms) — 0 from browser, set by CDP trace
+  renderingTime:      number;        // style recalc + layout time (ms) — from LoAF render phase
+  layoutCount:        number;        // forced layout count — 0 from browser, set by CDP trace
+  styleRecalcCount:   number;        // style recalc count — 0 from browser, set by CDP trace
+  domNodes:           number;        // DOM node count at interaction completion
+  jsListeners:        number;        // event listener count — 0 from browser, set by CDP trace
+  jsHeapUsed?:        number;        // JS heap used in bytes (Chrome only, via performance.memory)
+  topScripts?:        ScriptActivity[];    // per-script time from LoAF; present on Chrome 123+
+  topFunctions?:      FunctionProfile[];  // per-function CPU profile; only from vitalsage capture --full-report
+}
+```
+
+> Fields marked "0 from browser" require CDP trace events (available via `vitalsage capture --full-report`). All TraceAgent rules check `> threshold`, so `0` never produces a false positive.
+
+---
+
+## Example Server
+
+The reference collection server (`examples/server`) uses Express + SQLite. Run it with:
+
+```bash
+cd examples/server
+pnpm dev       # tsx watch — auto-restarts on changes
+# or
+pnpm start     # tsx — one-shot
+```
+
+Listens on **http://localhost:3001**.
+
+### Endpoints
+
+**`POST /api/interaction`**
+
+Save a real-user interaction. The browser SDK calls this automatically.
+
+```
+Body: { app: string, ...Interaction }
+```
+
+The `app` field groups interactions by frontend app (e.g. `vanilla`, `react`, `nextjs`). Defaults to `'unknown'` if omitted.
+
+```bash
+curl -X POST http://localhost:3001/api/interaction \
+  -H 'Content-Type: application/json' \
+  -d '{"app":"vanilla","id":"abc123","type":"INITIAL_LOAD","status":"success",...}'
+```
+
+---
+
+**`GET /api/interactions`**
+
+List stored interactions with optional filters.
+
+| Query param | Description | Default |
+|---|---|---|
+| `?app=vanilla` | Filter by app name | — |
+| `?type=INITIAL_LOAD` | Filter by interaction type | — |
+| `?status=fail` | Filter by status (`success`, `fail`, `timeout`, `cancel`) | — |
+| `?uri=/products` | LIKE filter on URI path | — |
+| `?limit=100` | Max rows returned | `100` |
+| `?full=1` | Include full interaction JSON in each row | off |
+
+```bash
+# Last 10 failed loads in the vanilla app
+curl "http://localhost:3001/api/interactions?app=vanilla&status=fail&limit=10"
+
+# Full interaction JSON for all routes
+curl "http://localhost:3001/api/interactions?full=1&limit=50"
+```
+
+---
+
+**`GET /api/interaction/:id`**
+
+Retrieve the full stored interaction JSON by interaction ID.
+
+```bash
+curl "http://localhost:3001/api/interaction/abc123"
+```
+
+---
+
+**`PATCH /api/interaction/:id/trace`**
+
+Enrich a stored interaction with CDP trace data (called automatically by `vitalsage capture`).
+
+```
+Body: { traceMetrics: TraceMetrics }
+Response: { ok: true, id: string }
+```
+
+Merges `traceMetrics` into the interaction's `page` context so future `/api/audit` calls include flame-graph data.
+
+---
+
+### AI audit via SSE
+
+**`GET /api/audit`** — streams analysis findings as Server-Sent Events. Results arrive per route as each completes, rather than waiting for all routes.
+
+| Query param | Description | Default |
+|---|---|---|
+| `?app=vanilla` | App name to analyse (**required**) | — |
+| `?minSamples=5` | Min interactions per route | `5` |
+| `?route=/products` | Analyse a single route only | all routes |
+| `?limit=500` | Max interactions to load | `500` |
+
+**Event stream:**
+
+```
+event: start
+data: {"app":"vanilla","interactions":243,"sessions":241,"routes":4,"ai":"anthropic"}
+
+event: route
+data: {"path":"/products","index":1,"total":4,"report":{...AnalysisReport...},"elapsed":1234}
+
+event: route
+data: {"path":"/","index":2,"total":4,"report":{...},"elapsed":2801}
+
+event: done
+data: {"routes":4,"suggestions":12,"elapsed":5432}
+```
+
+```bash
+# Stream findings with curl
+curl -N "http://localhost:3001/api/audit?app=vanilla&minSamples=1"
+
+# Pretty-print each route report
+curl -N "http://localhost:3001/api/audit?app=vanilla" | \
+  while IFS= read -r line; do
+    echo "$line" | grep '^data:' | cut -c7- | python3 -m json.tool 2>/dev/null
+  done
+```
+
+**AI provider auto-detection** (checked in order at server startup):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...   # → claude-sonnet-4-20250514
+OPENAI_API_KEY=sk-...          # → gpt-4o
+GEMINI_API_KEY=...             # → gemini-1.5-pro
+```
+
+---
+
+## CLI — `vitalsage`
+
+Install and link globally:
+
+```bash
+cd packages/cli && pnpm build
+# copy dist/index.cjs to your global node bin, or use:
+npm link
+```
+
+### simulate
+
+Run synthetic Playwright sessions across network and viewport profiles; save results as session JSON files for off-line analysis.
+
+```bash
+vitalsage simulate --url <url> [options]
+
+  --url          Base URL to simulate (required)
+  --runs         Runs per network/viewport combination  [default: 50]
+  --routes       Additional routes (space-separated)    [default: /]
+  --networks     Network profiles                       [default: 4g 3g slow-2g]
+                 wifi | 4g | 3g | 2g | slow-2g
+  --viewports    Viewport profiles                      [default: desktop mobile]
+                 desktop | tablet | mobile
+  --output       Output directory for session JSON      [default: ./vitalsage-data]
+  --concurrency  Max parallel browser instances         [default: 3]
+```
+
+```bash
+# Basic run
+vitalsage simulate --url https://example.com
+
+# Full matrix across 4 networks, 2 viewports, 3 routes
+vitalsage simulate \
+  --url https://example.com \
+  --runs 10 \
+  --networks wifi 4g 3g slow-2g \
+  --viewports desktop mobile \
+  --routes / /about /products \
+  --output ./my-data
+```
+
+**Network profiles:**
+
+| Profile | Throttle |
+|---|---|
+| `wifi` | None |
+| `4g` | Emulated mobile 4G |
+| `3g` | Emulated mobile 3G |
+| `2g` | Emulated mobile 2G |
+| `slow-2g` | Emulated slow 2G |
+
+**Viewport profiles:**
+
+| Profile | Size | DPR | Mobile emulation |
+|---|---|---|---|
+| `desktop` | 1280 × 800 | 1 | No |
+| `tablet` | 768 × 1024 | 2 | Yes |
+| `mobile` | 375 × 812 | 3 | Yes |
+
+### analyze
+
+Analyze a directory of session JSON files (or an HTTP endpoint) and print findings.
+
+```bash
+vitalsage analyze --sessions <dir> | --sessions-url <url> [options]
+
+  --sessions        Directory of session JSON files
+  --sessions-url    HTTP endpoint returning session JSON array
+  --sessions-auth   Authorization header (e.g. "Bearer token")
+  --min-samples     Min sessions per route                 [default: 50]
+  --format          Output format                          [default: terminal]
+                    terminal | html | json
+  --output          Output file (required for html/json)
+  --ai-provider     anthropic | openai | gemini
+  --ai-key          API key for AI provider
+  --ai-model        Model name override
+```
+
+```bash
+# Terminal output from local sessions
+vitalsage analyze --sessions ./vitalsage-data
+
+# HTML report with AI suggestions
+vitalsage analyze \
+  --sessions ./vitalsage-data \
+  --format html \
+  --output report.html \
+  --ai-provider anthropic \
+  --ai-key $ANTHROPIC_API_KEY
+
+# From a remote endpoint
+vitalsage analyze \
+  --sessions-url https://my-api.com/sessions \
+  --sessions-auth "Bearer my-token" \
+  --min-samples 10
+```
+
+### trace
+
+Capture a live performance trace with Playwright and immediately analyze it. No server needed.
+
+```bash
+vitalsage trace --url <url> [options]
+
+  --url          URL to trace (required)
+  --runs         Trace runs to average                    [default: 3]
+  --network      Network profile                          [default: 4g]
+  --viewport     Viewport profile                         [default: desktop]
+  --delay        Ms between runs                          [default: 2000]
+  --full-report  Enable V8 CPU profiler for per-function flame chart
+                 (~10–15% overhead, enables FunctionProfile data)
+  --output       Save report (.html or .json)
+  --ai-provider  anthropic | openai | gemini
+  --ai-key       API key
+  --ai-model     Model name override
+```
+
+```bash
+# Quick terminal trace
+vitalsage trace --url https://example.com
+
+# Full flame chart + AI + HTML report
+vitalsage trace \
+  --url https://example.com \
+  --runs 5 \
+  --full-report \
+  --output trace-report.html \
+  --ai-provider anthropic \
+  --ai-key $ANTHROPIC_API_KEY
+```
+
+Terminal output includes:
+- Main thread breakdown: JS Execute, JS Compile, Rendering (with bar charts and colour coding)
+- Total Blocking Time + long task count
+- Flame chart: top functions by self time (`--full-report`) or top scripts by execution time
+- Rule-based findings from all 9 agents
+- AI-enhanced suggestions when `--ai-key` is provided
+
+### capture
+
+Enrich real-user interactions stored on the server with a CDP trace. Combines real CWV distributions (p75 from actual users) with trace data for deeper, more accurate analysis than synthetic-only runs.
+
+```bash
+vitalsage capture <url> [options]
+
+  <url>          URL to capture (positional or --url)
+  --server       VitalSage server URL                     [default: http://localhost:3001]
+  --app          App name filter (optional — omit to match any app for the URL)
+  --runs         Playwright trace runs to average        [default: 3]
+  --network      Network profile                         [default: 4g]
+  --viewport     Viewport profile                        [default: desktop]
+  --full-report  V8 CPU profiler for per-function flame chart
+  --no-server    Skip server fetch/patch — trace-only analysis
+  --output       Save HTML/JSON report
+  --ai-provider  anthropic | openai | gemini
+  --ai-key       API key
+  --ai-model     Model name override
+```
+
+```bash
+# Enrich real sessions (any app) for a local dev server
+vitalsage capture http://localhost:5173
+
+# Specific app + full trace + AI analysis
+vitalsage capture http://localhost:5173 \
+  --app vanilla \
+  --full-report \
+  --ai-provider anthropic \
+  --ai-key $ANTHROPIC_API_KEY \
+  --output capture.html
+
+# Trace only — no server required
+vitalsage capture https://example.com --no-server --runs 5
+```
+
+**Flow:**
+1. Fetches real-user interactions from the server (matched by URL path, optionally filtered by `--app`)
+2. Runs Playwright trace capture and averages across `--runs`
+3. Displays real-user p75 CWV (LCP, FCP, TTFB, CLS, INP) from actual sessions
+4. Displays main-thread breakdown + flame chart from the live trace
+5. Injects trace data into the most-recent real session; runs all 9 agents on the combined data
+6. PATCHes the server so future `/api/audit` calls include the trace data
+7. Saves HTML/JSON report if `--output` is provided
+
+### report
+
+Regenerate an HTML report from a previously saved analysis JSON file.
+
+```bash
+vitalsage report --input analysis.json --output report.html
+```
+
+---
+
+## Analysis Engine — `vitalsage-analysis`
+
+```typescript
+import { AnalysisEngine, interactionsToSessions } from 'vitalsage-analysis';
+
+// Convert real-user Interaction objects from the server into SessionReports
+const sessions = interactionsToSessions(interactions);
+// cancel-status interactions are dropped automatically
+
+// Run analysis (waits for all routes to complete)
+const engine  = new AnalysisEngine({ ai: { provider: 'anthropic', apiKey: '...' } });
+const reports = await engine.analyze(sessions, { minSamples: 10 });
+
+// Or stream results per route as they complete (better for SSE / progressive UI)
+for await (const report of engine.analyzeStream(sessions, { minSamples: 5 })) {
+  console.log(report.route.path, report.suggestions.length, 'suggestions');
+}
+```
+
+**`EngineConfig`:**
+
+```typescript
+interface EngineConfig {
+  ai?: {
+    provider: 'anthropic' | 'openai' | 'gemini';
+    apiKey:   string;
+    model?:   string;  // overrides the default model for the provider
+  };
+  agents?:     'all' | string[];         // restrict to specific agent names; default: 'all'
+  thresholds?: Partial<ThresholdConfig>; // override CWV thresholds
+}
+```
+
+**`AnalysisOptions`:**
+
+```typescript
+interface AnalysisOptions {
+  minSamples?:           number;  // min sessions per route; default: 50
+  timeWindow?:           { from: number; to: number };
+  includeRealOnly?:      boolean;
+  includeSyntheticOnly?: boolean;
+}
+```
+
+### Agents
+
+Nine agents run in parallel per route. Each produces `Suggestion` objects with `severity`, `title`, `detail`, `estimatedImpact`, and `learnMore`.
+
+| Agent | Metric focus | What it detects |
+|---|---|---|
+| **lcp** | LCP | Missing `fetchpriority="high"` on LCP image; cross-origin LCP without preload; large mobile/desktop gap; TTFB masking LCP |
+| **cls** | CLS | Unsized above-fold images; fonts without `font-display: swap/optional`; very high CLS |
+| **inp** | INP | High INP on mobile vs desktop; synchronous third-party scripts blocking interaction; very poor INP (> 500ms) |
+| **ttfb** | TTFB | Slow server response (> 600ms); redirect chains; service worker overhead (> 200ms); high DNS time (> 100ms) |
+| **image** | LCP, FCP | LCP image in legacy format (JPEG/PNG instead of WebP/AVIF); oversized LCP image; above-fold images with `loading="lazy"` |
+| **font** | CLS, FCP | Fonts not preloaded; preloaded fonts missing `crossorigin`; fonts without `font-display` |
+| **render-block** | FCP, LCP | Synchronous scripts in `<head>`; more than 3 render-blocking stylesheets |
+| **resource-hint** | LCP, FCP | LCP image not preloaded; third-party origins without `preconnect` (flagged when > 6 distinct origins) |
+| **trace** | TBT, LCP | Main-thread analysis — see table below |
+
+### Metric thresholds
+
+Follow Google CrUX definitions; overridable via `EngineConfig.thresholds`.
+
+| Metric | Good | Poor |
+|---|---|---|
+| LCP    | ≤ 2500ms | > 4000ms |
+| FCP    | ≤ 1800ms | > 3000ms |
+| TTFB   | ≤ 800ms  | > 1800ms |
+| CLS    | ≤ 0.1    | > 0.25   |
+| INP    | ≤ 200ms  | > 500ms  |
+
+### Trace agent thresholds
+
+| Signal | Warning | Critical |
+|---|---|---|
+| Total Blocking Time | ≥ 300ms | ≥ 600ms |
+| JS scripting time | ≥ 500ms | ≥ 1500ms |
+| Forced layouts | ≥ 15 | ≥ 30 |
+| Style recalculations | ≥ 50 | — |
+| JS heap size | ≥ 100 MB | — |
+| JS compile ratio | > 40% of scripting time | — |
+| DOM nodes | ≥ 2500 | ≥ 5000 |
+| JS event listeners | ≥ 500 | — |
+| Rendering dominance | rendering > 60% of main-thread work AND scripting < 30% | — |
+| Hot functions | self time > 50ms and share > 10% | share > 25% |
+
+---
+
+## Simulator — `vitalsage-simulator`
+
+Used internally by `vitalsage trace` and `vitalsage simulate`. Can also be used as a library:
+
+```typescript
+import { PlaywrightSimulator } from 'vitalsage-simulator';
+
+const simulator = new PlaywrightSimulator();
+const sessions  = await simulator.simulate({
+  url:              'https://example.com',
+  runs:             10,
+  outputDir:        './sessions',
+  networks:         ['4g', '3g'],
+  viewports:        ['desktop', 'mobile'],
+  captureTrace:     true,   // V8 CPU Profiler via CDP Profiler domain
+  captureFullTrace: false,  // per-function flame chart (~10–15% overhead)
+  concurrency:      3,
+  waitAfterLoad:    3000,   // ms after page load before collecting metrics
+});
+```
+
+**Implementation notes:**
+- Uses `Profiler.start/stop` (CDP Profiler domain) rather than `Tracing.*` — Playwright intercepts the Tracing domain for its own `context.tracing` feature, causing `Tracing.start` to silently no-op. The Profiler domain gives identical V8 CPU sample data.
+- Sampling interval: `1000µs` when `captureFullTrace: true`; `5000µs` otherwise.
+- Navigation: tries `networkidle` (30s timeout), falls back to `load` + `waitForLoadState('networkidle', { timeout: 5000 }).catch()` for sites with persistent XHR/WebSocket connections (e.g. booking sites, live dashboards).
+
+---
+
+## Framework Integration Examples
+
+### Vanilla JS / HTML
+
+```html
+<!-- Add to every page that should be tracked -->
+<script type="module" src="./vitalsage-init.js"></script>
+```
+
+```javascript
+// vitalsage-init.js
+import { init, createLoggingAdapter, composeAdapters } from 'vitalsage';
+
+const serverAdapter = {
+  onInteraction: async (interaction) => {
+    fetch('http://localhost:3001/api/interaction', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ app: 'my-app', ...interaction }),
+    }).catch(() => {});
+  },
+};
+
+export const instance = init({
+  storage: {
+    adapter: composeAdapters(
+      createLoggingAdapter({ label: 'my-app' }),
+      serverAdapter,
+    ),
+  },
+});
+```
+
+### React
+
+```typescript
+// src/vitalsage-init.ts  (imported once from main.tsx before React mounts)
+import { init, createLoggingAdapter, composeAdapters } from 'vitalsage';
+import type { StorageAdapter } from 'vitalsage';
+
+const serverAdapter: StorageAdapter = {
+  onInteraction: async (interaction) => {
+    await fetch('http://localhost:3001/api/interaction', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ app: 'react', ...interaction }),
+    });
+  },
+};
+
+init({
+  storage: {
+    adapter: composeAdapters(
+      createLoggingAdapter({ label: 'react' }),
+      serverAdapter,
+    ),
+  },
+});
+```
+
+```tsx
+// src/main.tsx
+import './vitalsage-init';       // ← must come before React renders
+import { StrictMode } from 'react';
+import { createRoot }  from 'react-dom/client';
+import App             from './App';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode><App /></StrictMode>,
+);
+```
+
+### Next.js
+
+The SDK must only run in the browser. Use a client component with `useEffect`:
+
+```typescript
+// src/lib/vitalsage-init.ts
+let initialised = false;
+
+export async function bootVitalSage(): Promise<void> {
+  if (initialised || typeof window === 'undefined') return;
+  initialised = true;
+
+  // Dynamic import ensures the bundle is never loaded on the server
+  const { init, createLoggingAdapter, composeAdapters } = await import('vitalsage');
+
+  const serverAdapter = {
+    onInteraction: async (interaction: unknown) => {
+      await fetch('http://localhost:3001/api/interaction', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ app: 'nextjs', ...(interaction as object) }),
+      });
+    },
+  };
+
+  init({
+    storage: {
+      adapter: composeAdapters(
+        createLoggingAdapter({ label: 'nextjs' }),
+        serverAdapter,
+      ),
+    },
+  });
+}
+```
+
+```tsx
+// src/components/VitalSageProvider.tsx
+'use client';
+
+import { useEffect }    from 'react';
+import { bootVitalSage } from '../lib/vitalsage-init';
+
+export default function VitalSageProvider({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    bootVitalSage().catch(console.error);
+  }, []);
+
+  return <>{children}</>;
+}
+```
+
+```tsx
+// src/app/layout.tsx
+import VitalSageProvider from '../components/VitalSageProvider';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <VitalSageProvider>
+          {children}
+        </VitalSageProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+---
+
+## Development
+
+### Prerequisites
+
+- Node.js ≥ 18
+- pnpm ≥ 9
+- Playwright browsers: `pnpm exec playwright install chromium`
+
+### Workspace commands
+
+```bash
+pnpm build      # build all packages (excludes examples)
+pnpm test       # run all tests
+pnpm typecheck  # type-check all packages
+pnpm lint       # lint all packages
+pnpm clean      # remove all build artifacts
+```
+
+### Running all examples together
+
+```bash
+# Terminal 1 — collection server (port 3001)
+cd examples/server && pnpm dev
+
+# Terminal 2 — vanilla (port 5173)
+cd examples/vanilla && pnpm dev
+
+# Terminal 3 — react (port 5174)
+cd examples/react && pnpm dev
+
+# Terminal 4 — next.js (port 3002)
+cd examples/nextjs && pnpm dev
+```
+
+Each example posts to the same server. Filter by `?app=` when querying:
+
+```bash
+curl "http://localhost:3001/api/interactions?app=vanilla"
+curl "http://localhost:3001/api/interactions?app=react"
+curl "http://localhost:3001/api/interactions?app=nextjs"
+```
+
+### Package build order
+
+Packages depend on each other — `pnpm build` at the root handles ordering automatically:
+
+```
+@vitalsage/types  →  vitalsage (client)       independent
+@vitalsage/types  →  vitalsage-analysis       used by server + CLI
+@vitalsage/types  →  vitalsage-simulator      used by CLI
+vitalsage-analysis + vitalsage-simulator  →  vitalsage-cli
+```
+
+### How the CLI bundles its dependencies
+
+The CLI uses tsup with `noExternal: ['@vitalsage/types', 'vitalsage-analysis', 'vitalsage-simulator']`. This means `vitalsage-analysis` and `vitalsage-simulator` are inlined into the single `dist/index.cjs` binary at build time — the global `vitalsage` binary is fully self-contained. Only `playwright` and `fast-xml-parser` remain external (consumers must have them installed).

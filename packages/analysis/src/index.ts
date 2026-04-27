@@ -3,6 +3,7 @@ export { generateHtmlReport }        from './report-generator.js';
 export { loadSessionsFromDir }       from './loaders/file.js';
 export { loadSessionsFromUrl }       from './loaders/http.js';
 export { loadSessionsFromMemory }    from './loaders/memory.js';
+export { interactionToSession, interactionsToSessions } from './loaders/interaction.js';
 export { computeDistributions }      from './aggregator/distributions.js';
 export { groupSessionsByRoute, computeConfidence } from './aggregator/grouping.js';
 export { synthesizeContext }         from './aggregator/context-synth.js';
@@ -13,4 +14,4 @@ export { buildAgentUserPrompt, AI_SYSTEM_PROMPT } from './ai/prompts.js';
 
 export { TraceAgent } from './agents/trace.js';
 
-export type { AnalysisReport, AnalysisOptions, AgentContext } from '@vitalsage/types';
+export type { AnalysisReport, AnalysisOptions, AgentContext, EngineConfig } from '@vitalsage/types';

@@ -2,6 +2,7 @@ import type { ClientConfig } from '@vitalsage/types';
 import { collectDeviceContext }   from './collector/device.js';
 import { MetricsCollector }       from './collector/metrics.js';
 import { ContextCollector }       from './collector/context.js';
+import { LongTaskCollector }      from './collector/longtask.js';
 import { NavigationObserver }     from './routing/observer.js';
 import { InteractionTracker }     from './interaction/tracker.js';
 
@@ -29,8 +30,9 @@ export function init(config: ClientConfig): VitalSageInstance {
   const device      = collectDeviceContext();
   const metricsCol  = new MetricsCollector();
   const ctxCol      = new ContextCollector();
+  const ltCol       = new LongTaskCollector();
   const navObserver = new NavigationObserver(config.navigation?.mode ?? 'auto');
-  const tracker     = new InteractionTracker(config.storage.adapter, device, ctxCol);
+  const tracker     = new InteractionTracker(config.storage.adapter, device, ctxCol, ltCol);
 
   // Wire metrics → tracker
   metricsCol.subscribe(metric => tracker.onMetric(metric));
@@ -43,15 +45,17 @@ export function init(config: ClientConfig): VitalSageInstance {
     metricsCol.reset(); // clear per-route snapshot AFTER tracker has read the baseline
   });
 
+  ltCol.start();       // arm longtask / LoAF observers (buffered: true captures early tasks)
   metricsCol.start();
   navObserver.start();
-  tracker.start();  // starts INITIAL_LOAD interaction
+  tracker.start();     // starts INITIAL_LOAD interaction (resets ltCol to t=0)
 
   const instance: VitalSageInstance = {
     stop() {
       navObserver.stop();
       tracker.stop();
       metricsCol.reset();
+      ltCol.stop();
       activeInstance = null;
     },
   };

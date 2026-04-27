@@ -33,7 +33,12 @@
       "Bash(pnpm --filter vitalsage-simulator build)",
       "Bash(pnpm --filter vitalsage-analysis build)",
       "Bash(pnpm --filter @vitalsage/types build)",
-      "Bash(pnpm --filter @vitalsage/client build)"
+      "Bash(pnpm --filter @vitalsage/client build)",
+      "Bash(pnpm --filter @vitalsage/client run lint)",
+      "Bash(pnpm --filter vitalsage run lint)",
+      "Bash(pnpm --filter vitalsage-analysis test --run)",
+      "Bash(node -e \"import\\('vitalsage-simulator'\\).then\\(m => console.log\\('OK:', Object.keys\\(m\\).join\\(', '\\)\\)\\).catch\\(e => console.error\\('FAIL:', e.message\\)\\)\")",
+      "Bash(pnpm --filter './packages/**' -r run test --run)"
     ]
   }
 }

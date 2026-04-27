@@ -64,7 +64,27 @@ export class AnalysisEngine {
     sessions: SessionReport[],
     options:  AnalysisOptions = {},
   ): Promise<AnalysisReport[]> {
-    if (!sessions.length) return [];
+    const results: AnalysisReport[] = [];
+    for await (const report of this.analyzeStream(sessions, options)) {
+      results.push(report);
+    }
+    return results.sort((a, b) => b.sampleSize - a.sampleSize);
+  }
+
+  /**
+   * Streaming variant — yields one `AnalysisReport` per route as it completes.
+   *
+   * Use this when you want to push results to the client progressively (e.g.
+   * SSE or NDJSON) instead of waiting for all routes to finish.  With AI
+   * enhancement enabled, each route takes ~1-3 s for the LLM call; streaming
+   * means the first route's findings arrive immediately rather than after all
+   * routes are analysed.
+   */
+  async *analyzeStream(
+    sessions: SessionReport[],
+    options:  AnalysisOptions = {},
+  ): AsyncGenerator<AnalysisReport> {
+    if (!sessions.length) return;
 
     let filtered = sessions;
 
@@ -77,20 +97,16 @@ export class AnalysisEngine {
     if (options.includeRealOnly)      filtered = filtered.filter(s => !s.synthetic);
     if (options.includeSyntheticOnly) filtered = filtered.filter(s => s.synthetic);
 
-    const groups = groupSessionsByRoute(filtered, []);
-    const results: AnalysisReport[] = [];
+    const groups      = groupSessionsByRoute(filtered, []);
+    const minSamples  = options.minSamples ?? 50;
 
     for (const [, routeSessions] of groups) {
-      if (routeSessions.length < (options.minSamples ?? 50)) {
-        if (routeSessions.length > 0) {
-          results.push(this.buildInsufficientReport(routeSessions));
-        }
+      if (routeSessions.length < minSamples) {
+        if (routeSessions.length > 0) yield this.buildInsufficientReport(routeSessions);
         continue;
       }
-      results.push(await this.analyzeRoute(routeSessions));
+      yield await this.analyzeRoute(routeSessions);
     }
-
-    return results.sort((a, b) => b.sampleSize - a.sampleSize);
   }
 
   private async analyzeRoute(sessions: SessionReport[]): Promise<AnalysisReport> {

@@ -18,7 +18,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsup && tsc --project tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src --ext .ts",
@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "vitest": "^1.6.1"
+    "tsup":        "^8.5.1",
+    "vitest":      "^1.6.1"
   }
 }
