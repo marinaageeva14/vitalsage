@@ -48,11 +48,15 @@ CLI (vitalsage-cli)
    - [Metric thresholds](#metric-thresholds)
    - [Trace agent thresholds](#trace-agent-thresholds)
 7. [Simulator — `vitalsage-simulator`](#simulator--vitalsage-simulator)
-8. [Framework Integration Examples](#framework-integration-examples)
+8. [MCP Server — `vitalsage-mcp`](#mcp-server--vitalsage-mcp)
+   - [Setup](#setup)
+   - [Tools](#tools)
+   - [Autonomous debug loop](#autonomous-debug-loop)
+9. [Framework Integration Examples](#framework-integration-examples)
    - [Vanilla JS / HTML](#vanilla-js--html)
    - [React](#react)
    - [Next.js](#nextjs)
-9. [Development](#development)
+10. [Development](#development)
 
 ---
 
@@ -60,17 +64,20 @@ CLI (vitalsage-cli)
 
 ```
 vitalsage/
-├── packages/
+├── sdk/
 │   ├── client/        vitalsage            Browser SDK (ESM, CJS, IIFE)
-│   ├── analysis/      vitalsage-analysis   Analysis engine + 9 agents + AI
 │   ├── simulator/     vitalsage-simulator  Playwright synthetic runner
-│   ├── cli/           vitalsage-cli        CLI tool (globally linked)
 │   └── types/         @vitalsage/types     Shared TypeScript types
-└── examples/
-    ├── vanilla/        Multi-page HTML demo
-    ├── react/          React + React Router demo
-    ├── nextjs/         Next.js 14 App Router demo
-    └── server/         Express + SQLite collection server
+├── agent/
+│   ├── analysis/      vitalsage-analysis   Analysis engine + 9 agents + AI
+│   ├── cli/           vitalsage-cli        CLI tool (globally linked)
+│   └── mcp/           vitalsage-mcp        MCP server for Claude Code integration
+└── platform/
+    └── examples/
+        ├── vanilla/        Multi-page HTML demo
+        ├── react/          React + React Router demo
+        ├── nextjs/         Next.js 14 App Router demo
+        └── server/         Express + SQLite collection server
 ```
 
 ---
@@ -786,6 +793,166 @@ const sessions  = await simulator.simulate({
 
 ---
 
+## MCP Server — `vitalsage-mcp`
+
+The MCP server exposes VitalSage's measurement and analysis capabilities as tools
+that Claude Code (or any MCP-compatible AI agent) can call autonomously to
+diagnose and fix real performance problems in your codebase.
+
+### Setup
+
+**1. Build the server:**
+```bash
+pnpm build
+```
+
+**2. Register with Claude Code** — the repo ships with `.claude/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "vitalsage": {
+      "command": "node",
+      "args": ["agent/mcp/dist/index.js"]
+    }
+  }
+}
+```
+Claude Code auto-discovers this file. Restart Claude Code after first build.
+
+**3. Tell Claude to debug your page:**
+> "Audit http://localhost:3000/dashboard and fix whatever is hurting LCP the most."
+
+Claude will then autonomously loop through: measure → analyze → grep your code → edit files → re-measure to verify the fix.
+
+---
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `measure_page` | Synthetic Playwright run → CWV + optional TraceMetrics |
+| `analyze_performance` | Run 9 analysis agents over sessions → ranked suggestions |
+| `get_real_user_data` | Fetch real-user sessions from a running VitalSage server |
+| `compare_performance` | Before/after diff — verify that a fix actually improved metrics |
+| `audit_route` | Full end-to-end audit combining synthetic + real-user data |
+| `find_element_in_dom` | DOM inspector: LCP element, blocking scripts, CLS sources |
+
+#### `measure_page`
+
+```
+url           string   Page URL to measure (required)
+runs          number   Number of synthetic runs (1–20, default 3)
+networks      array    Network profiles: "wifi"|"4g"|"3g"|"2g"|"slow-2g" (default ["4g","3g"])
+viewports     array    Viewport profiles: "desktop"|"mobile"|"tablet" (default ["desktop","mobile"])
+captureTrace  boolean  Capture V8 CPU profile + DOM/JS heap metrics (default false)
+routes        array    Additional route paths on the same origin
+```
+
+Returns: `{ sessions, summary[{ route, runCount, lcp_p75, cls_p75, inp_p75, ttfb_p75, fcp_p75 }], durationMs }`
+
+#### `analyze_performance`
+
+```
+sessions      array    SessionReport[] from measure_page or get_real_user_data (required)
+minSamples    number   Minimum sessions per route (default 1 — good for synthetic)
+ai            object   { provider, apiKey, model? } — enables AI root-cause explanations
+agents        array    Specific agents to run (omit for all 9)
+```
+
+Returns: `AnalysisReport[]` — one per route, with distributions, suggestions, confidence.
+
+#### `get_real_user_data`
+
+```
+serverUrl     string   VitalSage server base URL (e.g. http://localhost:3001) (required)
+app           string   Filter by app name
+route         string   Filter by route path prefix
+limit         number   Max sessions to return (default 500, max 10000)
+since         number   Unix timestamp (ms) — only return sessions after this time
+```
+
+Returns: `{ sessions, total, routes[] }`
+
+#### `compare_performance`
+
+```
+url           string   Page URL (required)
+runs          number   Runs per pass (default 3)
+networks      array    Network profiles
+viewports     array    Viewport profiles
+baseline      array    Pre-existing SessionReport[] — skip the first measurement pass
+```
+
+Returns: `{ diffs[{ metric, before, after, delta, deltasPct, improved }], summary, durationMs }`
+
+Example summary:
+```
+3 metrics improved, 0 degraded.
+LCP: 4200→2800 (-33%), CLS: 0.18→0.04 (-78%), INP: 340→210 (-38%)
+```
+
+#### `audit_route`
+
+```
+url           string   Route URL (required)
+runs          number   Synthetic runs (default 5)
+serverUrl     string   VitalSage server URL — fetch real-user sessions to merge
+app           string   App name filter for real-user data
+ai            object   AI provider config for enhanced suggestions
+captureTrace  boolean  Capture CPU trace (default true)
+```
+
+Returns: `{ url, syntheticCount, realUserCount, analyses, topSuggestions[5], durationMs }`
+
+#### `find_element_in_dom`
+
+```
+url           string   Page URL (required)
+waitMs        number   Wait after load before snapshotting (500–15000ms, default 5000)
+network       string   "wifi"|"4g"|"3g" (default "4g")
+viewport      string   "desktop"|"mobile" (default "desktop")
+```
+
+Returns:
+```typescript
+{
+  lcpElement: {
+    tag, id, classes[], src, textPreview, width, height, isAboveFold
+  } | null,
+  blockingResources: [{ tag, src, reason }],
+  clsContributors:   [{ selector, shift, rect }],
+  imageLazyOpportunities: [{ src, width, height }],
+  thirdPartyScripts: [{ src, origin, async, defer }],
+}
+```
+
+---
+
+### Autonomous debug loop
+
+When you give Claude Code a performance goal, it follows this loop automatically:
+
+```
+1. audit_route(url)
+   → identify top issue (e.g. "LCP = 4.2s — render-blocking <script> in <head>")
+
+2. find_element_in_dom(url)
+   → confirm the LCP element and blocking script URLs
+
+3. [Claude reads your source files, finds the <script> tags, removes async-less ones]
+
+4. compare_performance(url, baseline=step1.sessions)
+   → verify LCP improved
+
+5. If not improved → analyze again, pick next suggestion, repeat
+```
+
+Claude Code has full access to your file system, so it can read component files,
+edit `<head>` templates, adjust webpack/vite configs, and then immediately
+re-measure to confirm the change worked — without you having to do anything manually.
+
+---
+
 ## Framework Integration Examples
 
 ### Vanilla JS / HTML
@@ -951,16 +1118,16 @@ pnpm clean      # remove all build artifacts
 
 ```bash
 # Terminal 1 — collection server (port 3001)
-cd examples/server && pnpm dev
+cd platform/examples/server && pnpm dev
 
 # Terminal 2 — vanilla (port 5173)
-cd examples/vanilla && pnpm dev
+cd platform/examples/vanilla && pnpm dev
 
 # Terminal 3 — react (port 5174)
-cd examples/react && pnpm dev
+cd platform/examples/react && pnpm dev
 
 # Terminal 4 — next.js (port 3002)
-cd examples/nextjs && pnpm dev
+cd platform/examples/nextjs && pnpm dev
 ```
 
 Each example posts to the same server. Filter by `?app=` when querying:
@@ -976,12 +1143,16 @@ curl "http://localhost:3001/api/interactions?app=nextjs"
 Packages depend on each other — `pnpm build` at the root handles ordering automatically:
 
 ```
-@vitalsage/types  →  vitalsage (client)       independent
-@vitalsage/types  →  vitalsage-analysis       used by server + CLI
-@vitalsage/types  →  vitalsage-simulator      used by CLI
-vitalsage-analysis + vitalsage-simulator  →  vitalsage-cli
+sdk/types  →  sdk/client          independent
+sdk/types  →  agent/analysis      used by server + CLI + MCP
+sdk/types  →  sdk/simulator       used by CLI + MCP
+agent/analysis + sdk/simulator  →  agent/cli
+agent/analysis + sdk/simulator  →  agent/mcp
 ```
 
-### How the CLI bundles its dependencies
+### How bundles work
 
-The CLI uses tsup with `noExternal: ['@vitalsage/types', 'vitalsage-analysis', 'vitalsage-simulator']`. This means `vitalsage-analysis` and `vitalsage-simulator` are inlined into the single `dist/index.cjs` binary at build time — the global `vitalsage` binary is fully self-contained. Only `playwright` and `fast-xml-parser` remain external (consumers must have them installed).
+Both the CLI and MCP server use tsup with `noExternal` to inline workspace dependencies:
+
+- **`agent/cli`** — bundles `vitalsage-analysis`, `vitalsage-simulator`, `@vitalsage/types` into `dist/index.cjs`. The global `vitalsage` binary is fully self-contained. Only `playwright` stays external.
+- **`agent/mcp`** — same approach, bundles into `dist/index.js` (ESM). The MCP server runs as a single file with `node agent/mcp/dist/index.js`.

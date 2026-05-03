@@ -1,0 +1,33 @@
+{
+  "name": "vitalsage-mcp",
+  "version": "0.1.0",
+  "description": "VitalSage MCP server — autonomous performance debugging via Claude Code",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "vitalsage-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build":     "tsup",
+    "dev":       "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint":      "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "vitalsage-analysis":         "workspace:*",
+    "vitalsage-simulator":        "workspace:*",
+    "@vitalsage/types":           "workspace:*",
+    "playwright":                "^1.44.0",
+    "zod":                       "^3.23.0",
+    "zod-to-json-schema":        "^3.23.0"
+  },
+  "devDependencies": {
+    "tsup":       "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}

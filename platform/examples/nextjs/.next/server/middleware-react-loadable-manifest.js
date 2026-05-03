@@ -1,0 +1,1 @@
+self.__REACT_LOADABLE_MANIFEST="{\"lib/vitalsage-init.ts -> ../../../../../sdk/client/dist/vitalsage.js\":{\"id\":\"lib/vitalsage-init.ts -> ../../../../../sdk/client/dist/vitalsage.js\",\"files\":[\"static/chunks/_app-pages-browser_sdk_client_dist_vitalsage_js.js\"]}}"

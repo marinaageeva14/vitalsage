@@ -1,6 +1,4 @@
 packages:
-  - 'packages/*'
-  - 'examples/server'
-  - 'examples/vanilla'
-  - 'examples/react'
-  - 'examples/nextjs'
+  - 'sdk/*'
+  - 'agent/*'
+  - 'platform/examples/*'

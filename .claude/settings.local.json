@@ -38,7 +38,17 @@
       "Bash(pnpm --filter vitalsage run lint)",
       "Bash(pnpm --filter vitalsage-analysis test --run)",
       "Bash(node -e \"import\\('vitalsage-simulator'\\).then\\(m => console.log\\('OK:', Object.keys\\(m\\).join\\(', '\\)\\)\\).catch\\(e => console.error\\('FAIL:', e.message\\)\\)\")",
-      "Bash(pnpm --filter './packages/**' -r run test --run)"
+      "Bash(pnpm --filter './packages/**' -r run test --run)",
+      "Bash(cp -r packages/client    sdk/client)",
+      "Bash(cp -r packages/types     sdk/types)",
+      "Bash(cp -r packages/simulator sdk/simulator)",
+      "Bash(cp -r examples/server    sdk/server)",
+      "Bash(cp -r packages/analysis  agent/analysis)",
+      "Bash(sed -i '' 's|../../packages/client/dist/vitalsage.js|../../../sdk/client/dist/vitalsage.js|g' /Users/maksymkharchenko/vitalsage/platform/examples/vanilla/vitalsage-init.js)",
+      "Bash(sed -i '' 's|../../../packages/client/dist/vitalsage.js|../../../../sdk/client/dist/vitalsage.js|g' /Users/maksymkharchenko/vitalsage/platform/examples/react/src/vitalsage-init.ts)",
+      "Bash(sed -i '' 's|../../../../packages/client/dist/vitalsage.js|../../../../../sdk/client/dist/vitalsage.js|g' /Users/maksymkharchenko/vitalsage/platform/examples/nextjs/src/lib/vitalsage-init.ts)",
+      "Bash(node --input-type=module)",
+      "Bash(timeout 3 node /Users/maksymkharchenko/vitalsage/agent/mcp/dist/index.js)"
     ]
   }
 }

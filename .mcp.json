@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vitalsage": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/maksymkharchenko/vitalsage/agent/mcp/dist/index.js"
+      ],
+      "env": {}
+    }
+  }
+}
