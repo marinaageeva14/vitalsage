@@ -3,20 +3,26 @@
 Open-source browser performance SDK with AI-powered analysis. Captures real-user Core Web Vitals, main-thread traces, and page context — then routes findings through rule-based agents and an optional LLM for actionable suggestions.
 
 ```
-Browser SDK (vitalsage)
-  └─ captures CWV + long tasks + page context
-  └─ posts Interaction to your server
+sdk/client  (vitalsage)
+  └─ captures CWV + long tasks + page context in the browser
+  └─ posts Interaction to your collection server
 
-Example Server (examples/server)
+platform/examples/server
   └─ stores interactions in SQLite
   └─ /api/audit streams AnalysisReport per route via SSE
 
-CLI (vitalsage-cli)
+agent/cli  (vitalsage)
   └─ simulate   → synthetic Playwright runs
   └─ analyze    → off-line analysis from JSON files
   └─ trace      → on-demand CDP flame-graph
   └─ capture    → enriches real sessions with a trace
   └─ report     → regenerate HTML from saved JSON
+  └─ fix        → autonomous measure → audit → fix → verify loop
+
+agent/mcp  (vitalsage-mcp)
+  └─ MCP server for Claude Code / Cursor / any MCP client
+  └─ measure → analyze → DOM inspect → compare → audit
+  └─ enables autonomous performance debugging by AI agents
 ```
 
 ---
@@ -43,6 +49,7 @@ CLI (vitalsage-cli)
    - [trace](#trace)
    - [capture](#capture)
    - [report](#report)
+   - [fix](#fix)
 6. [Analysis Engine — `vitalsage-analysis`](#analysis-engine--vitalsage-analysis)
    - [Agents](#agents)
    - [Metric thresholds](#metric-thresholds)
@@ -92,11 +99,11 @@ pnpm install
 pnpm build
 
 # 3. Start the collection server
-cd examples/server && pnpm dev
+cd platform/examples/server && pnpm dev
 # → http://localhost:3001
 
 # 4. Start an example app (in a new terminal)
-cd examples/vanilla && pnpm dev
+cd platform/examples/vanilla && pnpm dev
 # → http://localhost:5173
 
 # 5. Browse the app — interactions are posted to the server automatically
@@ -115,7 +122,7 @@ export OPENAI_API_KEY=sk-...          # GPT-4o
 # or
 export GEMINI_API_KEY=...             # Gemini 1.5 Pro
 
-cd examples/server && pnpm dev
+cd platform/examples/server && pnpm dev
 ```
 
 ---
@@ -356,10 +363,10 @@ interface TraceMetrics {
 
 ## Example Server
 
-The reference collection server (`examples/server`) uses Express + SQLite. Run it with:
+The reference collection server (`platform/examples/server`) uses Express + SQLite. Run it with:
 
 ```bash
-cd examples/server
+cd platform/examples/server
 pnpm dev       # tsx watch — auto-restarts on changes
 # or
 pnpm start     # tsx — one-shot
@@ -486,9 +493,16 @@ GEMINI_API_KEY=...             # → gemini-1.5-pro
 Install and link globally:
 
 ```bash
-cd packages/cli && pnpm build
-# copy dist/index.cjs to your global node bin, or use:
-npm link
+# One-time pnpm global setup (if not already done)
+pnpm setup
+source ~/.zshrc   # or open a new terminal
+
+# Link the CLI
+cd agent/cli
+pnpm link --global
+
+# Verify
+vitalsage --help
 ```
 
 ### simulate
@@ -674,6 +688,54 @@ Regenerate an HTML report from a previously saved analysis JSON file.
 vitalsage report --input analysis.json --output report.html
 ```
 
+### fix
+
+Autonomous performance improvement loop. Measures → audits → generates AI-powered source file patches → verifies → retries until metrics improve or retries are exhausted.
+
+**`--retries` is required with no default.** You must explicitly decide how many AI + measure cycles to allow, because each retry calls your AI provider and runs multiple Playwright sessions.
+
+```bash
+vitalsage fix --url <url> --source <dir> --retries <n> --ai-provider <provider> --ai-key <key> [options]
+
+  --url          Page URL to audit and fix (required)
+  --source       Path to your source directory — HTML/CSS/JS files to read and edit (required)
+  --retries      Number of fix-and-verify cycles (REQUIRED, no default)
+                 Each retry: calls the AI provider + runs Playwright measurements.
+                 Recommended: 3–5 for typical issues, max 10 for complex pages.
+  --ai-provider  AI provider: anthropic | openai | gemini (required)
+  --ai-key       API key for the AI provider (required)
+  --ai-model     Model name override (optional)
+  --runs         Playwright runs per measurement pass   [default: 3]
+  --network      Network profile: 4g | 3g              [default: 4g]
+  --viewport     Viewport: desktop | mobile             [default: desktop]
+```
+
+```bash
+vitalsage fix \
+  --url http://localhost:5173 \
+  --source ./src \
+  --retries 5 \
+  --ai-provider anthropic \
+  --ai-key $ANTHROPIC_API_KEY
+```
+
+**What happens per attempt:**
+
+| Step | What happens |
+|------|-------------|
+| **0** | Captures a baseline measurement before any changes |
+| **1** | Runs all 9 agents on current sessions → identifies the top-priority issue |
+| **2** | Opens a real Playwright browser → confirms the LCP element, blocking scripts, CLS sources |
+| **3** | Reads your source files → AI generates precise search/replace patches → applies them |
+| **4** | Re-measures the page and compares against the original baseline |
+| **5** | If ≥ 3% improvement → done. Otherwise retries with updated context |
+
+**Safety constraints:**
+- AI failures and DOM inspection failures are non-fatal — the loop continues or exits cleanly
+- Max 5 patches per AI response (hard cap in the parser)
+- Source file reading is capped at 20 files / 25 KB per file to avoid token overflow
+- Improvement threshold is 3% — synthetic measurement noise won't trigger a false "success"
+
 ---
 
 ## Analysis Engine — `vitalsage-analysis`
@@ -724,17 +786,22 @@ interface AnalysisOptions {
 
 Nine agents run in parallel per route. Each produces `Suggestion` objects with `severity`, `title`, `detail`, `estimatedImpact`, and `learnMore`.
 
-| Agent | Metric focus | What it detects |
-|---|---|---|
-| **lcp** | LCP | Missing `fetchpriority="high"` on LCP image; cross-origin LCP without preload; large mobile/desktop gap; TTFB masking LCP |
-| **cls** | CLS | Unsized above-fold images; fonts without `font-display: swap/optional`; very high CLS |
-| **inp** | INP | High INP on mobile vs desktop; synchronous third-party scripts blocking interaction; very poor INP (> 500ms) |
-| **ttfb** | TTFB | Slow server response (> 600ms); redirect chains; service worker overhead (> 200ms); high DNS time (> 100ms) |
-| **image** | LCP, FCP | LCP image in legacy format (JPEG/PNG instead of WebP/AVIF); oversized LCP image; above-fold images with `loading="lazy"` |
-| **font** | CLS, FCP | Fonts not preloaded; preloaded fonts missing `crossorigin`; fonts without `font-display` |
-| **render-block** | FCP, LCP | Synchronous scripts in `<head>`; more than 3 render-blocking stylesheets |
-| **resource-hint** | LCP, FCP | LCP image not preloaded; third-party origins without `preconnect` (flagged when > 6 distinct origins) |
-| **trace** | TBT, LCP | Main-thread analysis — see table below |
+Every agent runs in two phases:
+
+1. **Rule-based `analyze()`** — fast, deterministic, zero cost. Checks specific thresholds against your real session data and produces data-driven suggestions with exact numbers (e.g. "p75 LCP is 4 200ms in 87% of sessions").
+2. **AI `enhance()`** — when an AI provider is configured, each agent sends the full CWV distributions, device breakdowns, and page context (LCP element, scripts, fonts, images, navigation timing) to the AI and receives 1–3 deeper, cross-correlated suggestions that the rules cannot catch. AI failures are non-fatal — the agent silently falls back to rule-based output.
+
+| Agent | Metric focus | Rule-based detections | AI enhancement focus |
+|---|---|---|---|
+| **lcp** | LCP | Missing `fetchpriority="high"`; cross-origin LCP without preload; mobile/desktop gap; TTFB masking LCP | Cross-correlates TTFB, resource hints, and image attributes for root-cause LCP diagnosis |
+| **cls** | CLS | Unsized above-fold images; fonts without `font-display`; very high CLS | Identifies non-obvious shift sources from layout/font interactions |
+| **inp** | INP | Mobile/desktop INP gap; synchronous third-party scripts in `<head>`; very poor INP | Diagnoses interaction latency from event handler patterns and third-party script timing |
+| **ttfb** | TTFB | Slow server response (> 600ms); redirect chains; service worker overhead; high DNS time | Correlates navigation timing breakdown with infrastructure and caching opportunities |
+| **image** | LCP, FCP | LCP image in legacy format (JPEG/PNG); oversized LCP image; above-fold images with `loading="lazy"` | Recommends format, sizing, and priority strategies specific to the LCP image |
+| **font** | CLS, FCP | Fonts not preloaded; preloaded fonts missing `crossorigin`; fonts without `font-display` | Diagnoses FOIT/FOUT patterns and recommends font subsetting or swap strategies |
+| **render-block** | FCP, LCP | Synchronous scripts in `<head>`; more than 3 render-blocking stylesheets | Identifies which specific blocking resources have the highest FCP impact |
+| **resource-hint** | LCP, FCP | LCP image not preloaded; third-party origins without `preconnect` | Prioritises which origins and resources to hint based on the full resource waterfall |
+| **trace** | TBT, LCP | Main-thread analysis — see table below | Cross-correlates CPU trace (scripting time, long tasks, hot scripts, hot functions) with CWV to give root-cause answers rather than generic threshold alerts |
 
 ### Metric thresholds
 
@@ -806,23 +873,42 @@ diagnose and fix real performance problems in your codebase.
 pnpm build
 ```
 
-**2. Register with Claude Code** — the repo ships with `.claude/mcp.json`:
+**2. Register with Claude Code:**
+
+The repo ships with `.mcp.json` at the root — Claude Code, Cursor, and other MCP clients auto-discover this file:
+
 ```json
 {
   "mcpServers": {
     "vitalsage": {
+      "type": "stdio",
       "command": "node",
-      "args": ["agent/mcp/dist/index.js"]
+      "args": ["/absolute/path/to/vitalsage/agent/mcp/dist/index.js"],
+      "env": {}
     }
   }
 }
 ```
-Claude Code auto-discovers this file. Restart Claude Code after first build.
 
-**3. Tell Claude to debug your page:**
+Or register it from the terminal using the `claude` CLI (use an absolute path):
+
+```bash
+claude mcp add --transport stdio --scope project vitalsage -- \
+  node /absolute/path/to/vitalsage/agent/mcp/dist/index.js
+```
+
+Verify it's registered:
+```bash
+claude mcp list
+# → vitalsage   stdio   node /absolute/path/...
+```
+
+**3. Restart Claude Code**, then confirm the 6 tools are available via `/mcp` in the chat panel.
+
+**4. Tell Claude to debug your page:**
 > "Audit http://localhost:3000/dashboard and fix whatever is hurting LCP the most."
 
-Claude will then autonomously loop through: measure → analyze → grep your code → edit files → re-measure to verify the fix.
+Claude will autonomously loop: measure → analyze → grep your code → edit files → re-measure to verify the fix.
 
 ---
 
@@ -930,7 +1016,11 @@ Returns:
 
 ### Autonomous debug loop
 
-When you give Claude Code a performance goal, it follows this loop automatically:
+There are two ways to run the full fix loop:
+
+#### Via Claude Code (MCP tools)
+
+When you give Claude Code a performance goal, it follows this loop automatically using the MCP tools:
 
 ```
 1. audit_route(url)
@@ -947,9 +1037,22 @@ When you give Claude Code a performance goal, it follows this loop automatically
 5. If not improved → analyze again, pick next suggestion, repeat
 ```
 
-Claude Code has full access to your file system, so it can read component files,
-edit `<head>` templates, adjust webpack/vite configs, and then immediately
-re-measure to confirm the change worked — without you having to do anything manually.
+Claude Code has full access to your file system, so it can read component files, edit `<head>` templates, adjust webpack/vite configs, and then immediately re-measure to confirm the change worked — without you having to do anything manually.
+
+#### Via CLI (`vitalsage fix`)
+
+The same loop is available as a standalone CLI command that works without Claude Code:
+
+```bash
+vitalsage fix \
+  --url http://localhost:5173 \
+  --source ./src \
+  --retries 5 \
+  --ai-provider anthropic \
+  --ai-key $ANTHROPIC_API_KEY
+```
+
+`--retries` is **required** (no default) to prevent unbounded AI spend. See the [fix](#fix) command reference for full details.
 
 ---
 

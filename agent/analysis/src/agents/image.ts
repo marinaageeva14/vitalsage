@@ -1,5 +1,7 @@
 import type { AgentContext, AgentName, MetricName } from '@vitalsage/types';
-import { BaseAgent, type RuleBasedResult } from './base.js';
+import { BaseAgent, type RuleBasedResult, type AIClient } from './base.js';
+import { buildImagePrompt, AI_SYSTEM_PROMPT } from '../ai/prompts.js';
+import { parseAIResponse } from '../ai/parser.js';
 
 export class ImageAgent extends BaseAgent {
   readonly name: AgentName = 'image';
@@ -76,5 +78,44 @@ export class ImageAgent extends BaseAgent {
     }
 
     return { suggestions, skipped: false };
+  }
+
+  async enhance(
+    result: RuleBasedResult,
+    ctx:    AgentContext,
+    ai:     AIClient | null,
+  ): Promise<RuleBasedResult> {
+    if (!ai || result.skipped) return result;
+
+    try {
+      const userPrompt = buildImagePrompt(
+        ctx.distributions.LCP,
+        ctx.distributions.FCP,
+        ctx.representativePage,
+        ctx.sampleSize,
+        ctx.confidence,
+        result.suggestions,
+      );
+
+      const response = await ai.complete({
+        systemPrompt: AI_SYSTEM_PROMPT,
+        userPrompt,
+        temperature: 0.2,
+        maxTokens:   1000,
+      });
+
+      const aiSuggestions = parseAIResponse(response.content, this.name, 'LCP');
+
+      const aiTitlesNorm = new Set(
+        aiSuggestions.map(s => s.title.toLowerCase().slice(0, 40))
+      );
+      const dedupedRules = result.suggestions.filter(
+        s => !aiTitlesNorm.has(s.title.toLowerCase().slice(0, 40))
+      );
+
+      return { ...result, suggestions: [...dedupedRules, ...aiSuggestions] };
+    } catch {
+      return result;
+    }
   }
 }

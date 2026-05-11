@@ -1,7 +1,14 @@
-import type { AgentName, MetricName } from '@vitalsage/types';
-import type { MetricDistribution } from '@vitalsage/types';
-import type { AnalysisConfidence } from '@vitalsage/types';
-import type { PageContext, TraceMetrics } from '@vitalsage/types';
+/**
+ * AI prompt builders — one per agent.
+ *
+ * Each function sends ONLY the data relevant to that agent's domain and gives
+ * the AI specific instructions that go beyond what the rule-based layer already
+ * checks. The rule-based suggestions are passed in so the AI doesn't repeat
+ * threshold alerts the rules already surfaced — it finds things the rules miss.
+ */
+import type { MetricDistribution, PageContext, TraceMetrics, Suggestion } from '@vitalsage/types';
+
+// ─── Shared types ────────────────────────────────────────────────────────────
 
 export const AI_SYSTEM_PROMPT = `
 You are a senior web performance engineer analyzing real-user measurement (RUM) data
@@ -10,6 +17,7 @@ from real user sessions.
 
 Rules:
 - Every suggestion must reference specific numbers from the data provided
+- Do not repeat findings that are already listed in "Rule-based findings" — add new insights
 - Do not give generic advice — "optimize images" is not acceptable
 - Reference p75 values, affected session counts, and device breakdowns in your detail text
 - Severity must match the data: p75 LCP > 4000ms = critical, 2500–4000ms = warning
@@ -35,10 +43,6 @@ export const ANTHROPIC_OUTPUT_SCHEMA = `
 </suggestions>
 `.trim();
 
-/**
- * Output schema for the trace agent — extends the base schema with a <metric>
- * field so the AI can attribute each finding to the most-affected CWV.
- */
 export const TRACE_OUTPUT_SCHEMA = `
 <suggestions>
   <suggestion>
@@ -57,43 +61,487 @@ export const TRACE_OUTPUT_SCHEMA = `
 </suggestions>
 `.trim();
 
-export function buildAgentUserPrompt(
-  agentName:     AgentName,
-  distributions: Partial<Record<MetricName, MetricDistribution>>,
-  page:          PageContext,
-  sampleSize:    number,
-  confidence:    AnalysisConfidence,
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+function fmsDist(d: MetricDistribution | undefined, name: string): string {
+  if (!d) return `${name}: no data`;
+  const mobile  = d.byDevice.mobile  ? ` mobile p75=${fmt(name, d.byDevice.mobile.p75!)}` : '';
+  const desktop = d.byDevice.desktop ? ` desktop p75=${fmt(name, d.byDevice.desktop.p75!)}` : '';
+  return `${name}: p50=${fmt(name, d.p50)} p75=${fmt(name, d.p75)} p95=${fmt(name, d.p95)} [${d.rating}] n=${d.sampleSize}${mobile}${desktop}`;
+}
+
+function fmt(name: string, v: number): string {
+  return name === 'CLS' ? v.toFixed(3) : `${Math.round(v)}ms`;
+}
+
+function ruleList(suggestions: Suggestion[]): string {
+  if (!suggestions.length) return '  (none yet)';
+  return suggestions.map(s => `  [${s.severity}] ${s.title}`).join('\n');
+}
+
+function header(sampleSize: number, confidence: string): string {
+  return `Sample size: ${sampleSize} sessions · Confidence: ${confidence}`;
+}
+
+// ─── LCP agent ───────────────────────────────────────────────────────────────
+
+export function buildLCPPrompt(
+  lcp:         MetricDistribution,
+  ttfb:        MetricDistribution | undefined,
+  page:        PageContext,
+  sampleSize:  number,
+  confidence:  string,
+  rules:       Suggestion[],
 ): string {
+  const el = page.lcpElement;
+
+  const lcpEl = el
+    ? [
+        `  element: <${el.elementType}>${el.src ? ` src="${el.src}"` : ''}`,
+        `  fetchpriority: ${el.fetchPriority ?? 'not set'}`,
+        `  preloaded: ${el.isPreloaded ? 'yes' : 'no'}`,
+        `  third-party: ${el.isThirdParty ? 'yes' : 'no'}`,
+        el.naturalWidth ? `  natural size: ${el.naturalWidth}×${el.naturalHeight}px  display: ${el.displayWidth}×${el.displayHeight}px` : '',
+      ].filter(Boolean).join('\n')
+    : '  LCP element: not detected';
+
+  const preloads = page.resources.filter(r => r.initiatorType === 'link' && r.name.includes('preload'));
+
   return `
-## Analysis Context
-- Sample size: ${sampleSize} sessions
-- Confidence: ${confidence}
-- Agent: ${agentName}
+${header(sampleSize, confidence)}
 
-## Core Web Vitals Distributions (p50 / p75 / p95)
-${formatDistributions(distributions)}
+## LCP Distribution
+${fmsDist(lcp, 'LCP')}
+${ttfb ? fmsDist(ttfb, 'TTFB') : ''}
 
-## Page Context (synthesized from sessions)
-${formatPageContext(page)}
+## LCP Element
+${lcpEl}
 
-## Your task
-Analyze the performance data above and generate 1-3 specific, actionable suggestions
-for the ${agentName} domain. Focus on the highest-impact issues first.
+## Resource Hints in <head>
+  Preload tags: ${preloads.length}
+  Preconnect/dns-prefetch origins: ${page.resources.filter(r => r.name.includes('preconnect')).length}
+
+## Render-blocking scripts delaying LCP
+  Count: ${page.scripts.filter(s => s.isRenderBlocking).length}
+  Blocking stylesheets: ${page.stylesheets.filter(s => s.isRenderBlocking).length}
+
+## Navigation timing (averages)
+  TTFB breakdown: redirect=${page.navigationTiming.redirectTime}ms dns=${page.navigationTiming.dnsTime}ms tls=${page.navigationTiming.tlsTime}ms server=${page.navigationTiming.serverTime}ms download=${page.navigationTiming.downloadTime}ms
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — LCP specialist
+Focus on what the rules missed. Investigate:
+1. Is TTFB the primary bottleneck? If server time > 600ms, LCP cannot improve until that is fixed first.
+2. Is the LCP element discovered late in the waterfall? Cross-correlate TTFB, render-blocking resources, and preload hints.
+3. Are there cross-origin penalties (no preconnect, no early-hint) for the LCP resource?
+4. Is the LCP image responsive? If natural size >> display size, bandwidth is wasted.
+5. Could server-side rendering or streaming improve first-byte time for LCP text elements?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
 }
 
-/**
- * Prompt for the trace agent — includes full trace metrics and cross-correlates
- * them with Core Web Vitals to produce root-cause analysis, not just threshold alerts.
- */
+// ─── CLS agent ───────────────────────────────────────────────────────────────
+
+export function buildCLSPrompt(
+  cls:        MetricDistribution,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const unsizedImages = page.images.filter(i => !i.hasExplicitDimensions && i.isAboveFold);
+  const badFonts      = page.fonts.filter(f => !f.isSystemFont && (f.display === 'auto' || f.display === 'block'));
+  const webFonts      = page.fonts.filter(f => !f.isSystemFont && !f.isIconFont);
+
+  return `
+${header(sampleSize, confidence)}
+
+## CLS Distribution
+${fmsDist(cls, 'CLS')}
+
+## Images (above-fold)
+  Total above-fold images: ${page.images.filter(i => i.isAboveFold).length}
+  Without explicit width/height: ${unsizedImages.length}
+  With loading="lazy" above fold: ${page.images.filter(i => i.isAboveFold && i.loading === 'lazy').length}
+
+## Fonts
+  Total web fonts: ${webFonts.length}
+  Without font-display:swap/optional: ${badFonts.length}
+  Preloaded fonts: ${page.fonts.filter(f => f.isPreloaded).length}
+  Fonts missing crossorigin: ${page.fonts.filter(f => f.isPreloaded && !f.hasCrossOrigin).length}
+
+## DOM
+  Total nodes: ${page.domNodeCount}
+  Scripts: ${page.scripts.length} (${page.scripts.filter(s => s.isRenderBlocking).length} render-blocking)
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — CLS specialist
+CLS is caused by unexpected layout shifts. The rules check for unsized images and missing font-display.
+Go deeper and investigate:
+1. Dynamically injected content — cookie banners, ads, notifications, skeleton loaders. Is there a pattern in the DOM that suggests dynamic injection that pushes content down?
+2. Web fonts — even with font-display:swap, a large font metric difference between fallback and web font causes shift. Are the fonts size-adjusted?
+3. Animations — are any CSS transitions or JS animations using non-composited properties (top, left, width, height) instead of transform?
+4. Iframes or embeds — do any third-party embeds (social widgets, maps) resize themselves after load?
+5. Late-arriving above-fold images without aspect-ratio CSS or explicit dimensions.
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── INP agent ───────────────────────────────────────────────────────────────
+
+export function buildINPPrompt(
+  inp:        MetricDistribution,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const syncThirdParty = page.scripts.filter(s => s.isThirdParty && s.position === 'head' && !s.isDeferred && !s.isAsync);
+  const allThirdParty  = page.scripts.filter(s => s.isThirdParty);
+  const mobileInp      = inp.byDevice.mobile?.p75;
+  const desktopInp     = inp.byDevice.desktop?.p75;
+
+  return `
+${header(sampleSize, confidence)}
+
+## INP Distribution
+${fmsDist(inp, 'INP')}
+${mobileInp && desktopInp ? `  Mobile/desktop ratio: ${(mobileInp / desktopInp).toFixed(2)}× (mobile worse)` : ''}
+
+## Scripts
+  Total scripts: ${page.scripts.length}
+  Third-party scripts: ${allThirdParty.length}
+  Synchronous third-party in <head>: ${syncThirdParty.length}${syncThirdParty.length ? '\n  → ' + syncThirdParty.map(s => s.src ?? '(inline)').join(', ') : ''}
+  Deferred: ${page.scripts.filter(s => s.isDeferred).length}
+  Async: ${page.scripts.filter(s => s.isAsync).length}
+
+## DOM complexity (affects event handler cost)
+  DOM nodes: ${page.domNodeCount}
+  Event-heavy selectors: ${page.scripts.filter(s => !s.isThirdParty).length} first-party scripts
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — INP specialist
+INP measures interaction latency — the time from a user gesture to the next frame paint.
+The rules flag mobile gaps and synchronous third-party scripts. Go deeper:
+1. Long tasks from first-party code — does DOM complexity, node count, or script count suggest heavy event handlers?
+2. scheduler.postTask / setTimeout(0) opportunities — could expensive work be yielded to let the browser respond sooner?
+3. Input delay vs processing time vs presentation delay — based on the INP value and device gap, which phase is likely dominant?
+4. Third-party analytics or tag managers that fire on every click — even async scripts can block the input callback.
+5. React/Vue/Angular hydration — does the framework timing suggest a hydration bottleneck before interactions are ready?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── TTFB agent ──────────────────────────────────────────────────────────────
+
+export function buildTTFBPrompt(
+  ttfb:       MetricDistribution,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const nav = page.navigationTiming;
+
+  return `
+${header(sampleSize, confidence)}
+
+## TTFB Distribution
+${fmsDist(ttfb, 'TTFB')}
+
+## Navigation timing breakdown (averages across sessions)
+  Redirect time:  ${nav.redirectTime}ms (${nav.redirectCount ?? 0} redirects)
+  DNS lookup:     ${nav.dnsTime}ms
+  TLS handshake:  ${nav.tlsTime}ms
+  Server time:    ${nav.serverTime}ms   ← time from connection established to first byte
+  Download time:  ${nav.downloadTime}ms
+  Service Worker: ${nav.workerTime ?? 0}ms (active in ${nav.isServiceWorker ? 'yes' : 'no'} sessions)
+
+## URL
+  ${page.url}
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — TTFB specialist
+TTFB is the sum of redirect + DNS + TLS + server response time. The rules flag obvious issues.
+Go deeper and investigate:
+1. Which component dominates? Server time > 400ms points to backend; TLS > 200ms points to no session resumption or OCSP; DNS > 100ms points to slow resolver.
+2. Is there evidence of no CDN (high server time uniformly across all sessions vs geographically varied)?
+3. Could HTTP/2 push or 103 Early Hints deliver critical subresources before the HTML is fully sent?
+4. Service Worker fetch handling overhead — if SW is active, is navigation preload enabled?
+5. Does the redirect chain suggest HTTP→HTTPS or www→non-www that could be eliminated at the DNS level?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── render-block agent ───────────────────────────────────────────────────────
+
+export function buildRenderBlockPrompt(
+  fcp:        MetricDistribution | undefined,
+  lcp:        MetricDistribution | undefined,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const blockingScripts = page.scripts.filter(s => s.isRenderBlocking);
+  const blockingSheets  = page.stylesheets.filter(s => s.isRenderBlocking);
+  const totalScriptKb   = blockingScripts.reduce((s, sc) => s + (sc.size ?? 0), 0) / 1024;
+  const totalSheetKb    = blockingSheets.reduce((s, ss) => s + (ss.transferSize ?? 0), 0) / 1024;
+
+  return `
+${header(sampleSize, confidence)}
+
+## FCP / LCP Distributions
+${fmsDist(fcp, 'FCP')}
+${fmsDist(lcp, 'LCP')}
+
+## Render-blocking scripts
+  Count: ${blockingScripts.length}
+  Total size: ${Math.round(totalScriptKb)}KB
+  Sources:
+${blockingScripts.map(s => `    ${s.src ?? '(inline)'} ${s.size ? `(${Math.round(s.size / 1024)}KB)` : ''}`).join('\n') || '    (none)'}
+
+## Render-blocking stylesheets
+  Count: ${blockingSheets.length}
+  Total size: ${Math.round(totalSheetKb)}KB
+  Sources:
+${blockingSheets.map(s => `    ${s.href ?? '(inline)'} ${s.transferSize ? `(${Math.round(s.transferSize / 1024)}KB)` : ''}`).join('\n') || '    (none)'}
+
+## Non-blocking scripts (async/defer/module)
+  Deferred: ${page.scripts.filter(s => s.isDeferred).length}
+  Async: ${page.scripts.filter(s => s.isAsync).length}
+  Module: ${page.scripts.filter(s => s.isModule).length}
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — render-blocking specialist
+The rules flag the presence of blocking scripts and stylesheets. Go deeper:
+1. Which blocking resource has the highest individual cost? Large blocking scripts that could be split or inlined (critical path only) vs deferred?
+2. Can any blocking stylesheets be converted to conditional loads (media queries) or inlined as critical CSS?
+3. Are there synchronous scripts that only need to run after DOMContentLoaded? They could be defer'd with no functional change.
+4. Is any blocking script a polyfill that modern browsers don't need? Could use module/nomodule pattern.
+5. Would inlining critical CSS for above-fold content and lazy-loading the full stylesheet improve FCP meaningfully given the p75 value?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── resource-hint agent ─────────────────────────────────────────────────────
+
+export function buildResourceHintPrompt(
+  lcp:        MetricDistribution,
+  fcp:        MetricDistribution | undefined,
+  ttfb:       MetricDistribution | undefined,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const el = page.lcpElement;
+  let pageOrigin = '';
+  try { pageOrigin = new URL(page.url).origin; } catch { /* ignore */ }
+
+  const thirdPartyOrigins = [...new Set(
+    page.resources
+      .map(r => { try { return new URL(r.name).origin; } catch { return ''; } })
+      .filter(o => o && o !== pageOrigin)
+  )];
+
+  const preloadedResources = page.resources.filter(r => r.initiatorType === 'link');
+
+  return `
+${header(sampleSize, confidence)}
+
+## LCP / FCP / TTFB Distributions
+${fmsDist(lcp, 'LCP')}
+${fmsDist(fcp, 'FCP')}
+${fmsDist(ttfb, 'TTFB')}
+
+## LCP Element
+  Type: ${el?.elementType ?? 'unknown'}
+  src: ${el?.src ?? 'n/a'}
+  Preloaded: ${el?.isPreloaded ? 'yes' : 'no'}
+  fetchpriority: ${el?.fetchPriority ?? 'not set'}
+  Third-party: ${el?.isThirdParty ? 'yes' : 'no'}
+
+## Existing preload/preconnect hints
+  Preloaded resources: ${preloadedResources.length}
+  Third-party origins on page: ${thirdPartyOrigins.length}
+  Origins: ${thirdPartyOrigins.slice(0, 8).join(', ') || 'none'}
+
+## Key resources (by transfer size, top 5)
+${page.resources
+  .sort((a, b) => (b.transferSize ?? 0) - (a.transferSize ?? 0))
+  .slice(0, 5)
+  .map(r => `  ${r.name.slice(-60)} ${r.transferSize ? Math.round(r.transferSize / 1024) + 'KB' : ''} ${r.initiatorType}`)
+  .join('\n') || '  (no data)'}
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — resource hint specialist
+Resource hints (preload, preconnect, prefetch, dns-prefetch, modulepreload) tell the browser
+what to fetch before it discovers resources organically. The rules check for missing LCP preload
+and obvious preconnect gaps. Go deeper:
+1. Is the LCP resource on a third-party CDN that needs both preconnect AND preload?
+2. Are there critical fonts, scripts, or API calls early in the render path that would benefit from preload?
+3. Are there third-party origins whose DNS resolution could be started earlier with dns-prefetch?
+4. Could modulepreload for ES module entry points improve FCP/LCP?
+5. Are any existing preload hints wasted (preloading resources that are already in the critical path and discovered early)?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── image agent ─────────────────────────────────────────────────────────────
+
+export function buildImagePrompt(
+  lcp:        MetricDistribution | undefined,
+  fcp:        MetricDistribution | undefined,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const el       = page.lcpElement;
+  const lcpImg   = page.images.find(i => i.isLCP);
+  const aboveFold = page.images.filter(i => i.isAboveFold);
+  const lazyAboveFold = aboveFold.filter(i => i.loading === 'lazy');
+  const noSrcset  = aboveFold.filter(i => !i.isResponsive);
+
+  return `
+${header(sampleSize, confidence)}
+
+## LCP / FCP Distributions
+${fmsDist(lcp, 'LCP')}
+${fmsDist(fcp, 'FCP')}
+
+## LCP Image
+  Format: ${lcpImg?.format ?? 'unknown'}
+  Natural size: ${el?.naturalWidth ?? '?'}×${el?.naturalHeight ?? '?'}px
+  Display size: ${el?.displayWidth ?? '?'}×${el?.displayHeight ?? '?'}px
+  Oversize ratio: ${el?.naturalWidth && el?.displayWidth ? (el.naturalWidth / el.displayWidth).toFixed(2) + '×' : 'unknown'}
+  fetchpriority: ${el?.fetchPriority ?? 'not set'}
+  loading: ${lcpImg?.loading ?? 'unknown'}
+  Has srcset: ${lcpImg?.isResponsive ? 'yes' : 'no'}
+
+## Above-fold images (${aboveFold.length} total)
+  With loading="lazy": ${lazyAboveFold.length}
+  Without srcset: ${noSrcset.length}
+  Without explicit dimensions: ${aboveFold.filter(i => !i.hasExplicitDimensions).length}
+
+## All images
+  Total: ${page.images.length}
+  Below-fold without lazy: ${page.images.filter(i => !i.isAboveFold && i.loading !== 'lazy').length}
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — image specialist
+Images are the most common LCP bottleneck. The rules check format, oversize ratio, and lazy loading.
+Go deeper:
+1. Is the LCP image decoded on the main thread (no lazy, but also no decoding="async")? Large images can block rendering during decode.
+2. Are there responsive image opportunities (srcset + sizes) that would reduce bandwidth on mobile significantly?
+3. Could AVIF over WebP provide meaningful additional savings for the LCP image given its format and content type?
+4. Are below-fold images missing loading="lazy", unnecessarily consuming bandwidth before the LCP image finishes?
+5. Could image compression quality be tuned (e.g. WebP quality 80 vs 90) for the LCP image to reduce transfer size?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── font agent ───────────────────────────────────────────────────────────────
+
+export function buildFontPrompt(
+  fcp:        MetricDistribution | undefined,
+  cls:        MetricDistribution | undefined,
+  page:       PageContext,
+  sampleSize: number,
+  confidence: string,
+  rules:      Suggestion[],
+): string {
+  const webFonts         = page.fonts.filter(f => !f.isSystemFont && !f.isIconFont);
+  const preloaded        = webFonts.filter(f => f.isPreloaded);
+  const missingCrossOrigin = webFonts.filter(f => f.isPreloaded && !f.hasCrossOrigin);
+  const badDisplay       = webFonts.filter(f => f.display === 'auto' || f.display === 'block');
+  const noDisplay        = webFonts.filter(f => !f.display);
+
+  return `
+${header(sampleSize, confidence)}
+
+## FCP / CLS Distributions
+${fmsDist(fcp, 'FCP')}
+${fmsDist(cls, 'CLS')}
+
+## Web fonts (${webFonts.length} total, excluding system and icon fonts)
+${webFonts.map(f => [
+  `  ${f.family ?? 'unknown family'}`,
+  `    url: ${f.url ?? 'n/a'}`,
+  `    display: ${f.display ?? 'not set'}`,
+  `    preloaded: ${f.isPreloaded ? 'yes' : 'no'}`,
+  `    crossorigin: ${f.hasCrossOrigin ? 'yes' : 'no'}`,
+  `    format: ${f.format ?? 'unknown'}`,
+].join('\n')).join('\n') || '  (none)'}
+
+## Summary
+  Preloaded: ${preloaded.length} / ${webFonts.length}
+  Missing crossorigin on preload: ${missingCrossOrigin.length}
+  Using font-display:auto or block (causes FOIT): ${badDisplay.length}
+  No font-display set: ${noDisplay.length}
+
+## Rule-based findings already identified (do NOT repeat these)
+${ruleList(rules)}
+
+## Your task — font loading specialist
+Font loading affects both FCP (invisible text during load) and CLS (layout shift when font swaps).
+The rules catch missing preload, missing crossorigin, and missing font-display. Go deeper:
+1. Are fonts self-hosted or served from Google Fonts / Adobe / other CDN? CDN fonts add a cross-origin round-trip that preconnect alone doesn't fully solve.
+2. Are there more font weights/variants declared than are actually used on the page? Unused variants waste bandwidth.
+3. Could font-display:optional eliminate CLS entirely for decorative fonts (where invisible text briefly is acceptable)?
+4. Is unicode-range subsetting applied? Large fonts for Latin-only pages can be subsetted aggressively.
+5. Are variable fonts available that could replace multiple weight files with a single file?
+
+Generate 1-3 specific suggestions the rule-based layer did not catch.
+
+${ANTHROPIC_OUTPUT_SCHEMA}
+`.trim();
+}
+
+// ─── trace agent (unchanged — already has its own dedicated prompt) ───────────
+
 export function buildTraceUserPrompt(
-  distributions: Partial<Record<MetricName, MetricDistribution>>,
+  distributions: Partial<Record<string, MetricDistribution>>,
   page:          PageContext,
   trace:         TraceMetrics,
   sampleSize:    number,
-  confidence:    AnalysisConfidence,
+  confidence:    string,
 ): string {
   return `
 ## Analysis Context
@@ -102,7 +550,9 @@ export function buildTraceUserPrompt(
 - Agent: trace (CPU / rendering profiler)
 
 ## Core Web Vitals Distributions (p50 / p75 / p95)
-${formatDistributions(distributions)}
+${Object.entries(distributions)
+  .map(([name, d]) => d ? fmsDist(d, name) : '')
+  .filter(Boolean).join('\n')}
 
 ## Main Thread Breakdown (from CDP trace — same data as Chrome DevTools Performance tab)
 - Total main-thread work: ${Math.round(trace.mainThreadWork)}ms
@@ -131,7 +581,9 @@ ${trace.topFunctions.slice(0, 10).map(f =>
 ).join('\n')}` : ''}
 
 ## Page Context
-${formatPageContext(page)}
+URL: ${page.url}
+DOM nodes: ${page.domNodeCount}
+Scripts: ${page.scripts.length} (${page.scripts.filter(s => s.isRenderBlocking).length} render-blocking)
 
 ## Your task
 You are analyzing CPU and rendering performance from a real CDP trace.
@@ -147,49 +599,6 @@ script names, function names, and millisecond values from the trace data above.
 
 ${TRACE_OUTPUT_SCHEMA}
 `.trim();
-}
-
-function formatDistributions(dists: Partial<Record<MetricName, MetricDistribution>>): string {
-  return Object.entries(dists)
-    .map(([name, d]) => {
-      if (!d) return '';
-      const base =
-        `${name}: p50=${formatVal(name, d.p50)} / p75=${formatVal(name, d.p75)} / p95=${formatVal(name, d.p95)} [${d.rating}] (n=${d.sampleSize})`;
-      const mobile  = d.byDevice.mobile  ? `\n  → Mobile p75: ${formatVal(name, d.byDevice.mobile.p75!)}` : '';
-      const desktop = d.byDevice.desktop ? `\n  → Desktop p75: ${formatVal(name, d.byDevice.desktop.p75!)}` : '';
-      return base + mobile + desktop;
-    })
-    .filter(Boolean)
-    .join('\n');
-}
-
-function formatPageContext(page: PageContext): string {
-  const lines: string[] = [
-    `URL: ${page.url}`,
-    `DOM nodes: ${page.domNodeCount}`,
-    `Resources: ${page.resources.length}`,
-    `Scripts: ${page.scripts.length} (${page.scripts.filter(s => s.isRenderBlocking).length} render-blocking)`,
-    `Stylesheets: ${page.stylesheets.length} (${page.stylesheets.filter(s => s.isRenderBlocking).length} render-blocking)`,
-    `Fonts: ${page.fonts.length} (${page.fonts.filter(f => !f.isSystemFont && !f.isIconFont).length} web fonts)`,
-    `Images: ${page.images.length} (${page.images.filter(i => i.isAboveFold).length} above fold)`,
-  ];
-
-  if (page.lcpElement) {
-    const el = page.lcpElement;
-    lines.push(`LCP element: <${el.elementType}> ${el.src ?? ''} ${el.isPreloaded ? '[preloaded]' : '[not preloaded]'}`);
-    if (el.naturalWidth && el.displayWidth) {
-      lines.push(`  LCP size: natural=${el.naturalWidth}px display=${el.displayWidth}px`);
-    }
-  }
-
-  const { redirectTime, dnsTime, tlsTime, serverTime, downloadTime } = page.navigationTiming;
-  lines.push(`Navigation timing: redirect=${redirectTime}ms dns=${dnsTime}ms tls=${tlsTime}ms server=${serverTime}ms download=${downloadTime}ms`);
-
-  return lines.join('\n');
-}
-
-function formatVal(name: string, v: number): string {
-  return name === 'CLS' ? v.toFixed(3) : `${Math.round(v)}ms`;
 }
 
 function pct(part: number, total: number): string {

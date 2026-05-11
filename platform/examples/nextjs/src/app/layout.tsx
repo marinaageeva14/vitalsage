@@ -1,6 +1,6 @@
 import type { Metadata }   from 'next';
 import NavBar              from '../components/NavBar';
-import VitalSageProvider    from '../components/VitalSageProvider';
+import VitalSageProvider   from '../components/VitalSageProvider';
 import './globals.css';
 
 export const metadata: Metadata = {

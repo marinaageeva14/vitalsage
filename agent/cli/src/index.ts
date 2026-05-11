@@ -3,6 +3,7 @@ import { runAnalyze }  from './commands/analyze.js';
 import { runReport }   from './commands/report.js';
 import { runTrace }    from './commands/trace.js';
 import { runCapture }  from './commands/capture.js';
+import { runFix }      from './commands/fix.js';
 import { printError }  from './output/terminal.js';
 
 function parseArgs(argv: string[]): Map<string, string | string[] | boolean> {
@@ -62,6 +63,7 @@ Usage:
   vitalsage report   --input <file> --output <file>
   vitalsage trace    --url <url> [options]
   vitalsage capture  <url> [options]
+  vitalsage fix      --url <url> --source <dir> --retries <n> --ai-key <key> --ai-provider <provider>
 
 Commands:
   simulate    Run synthetic sessions using Playwright
@@ -69,6 +71,7 @@ Commands:
   report      Generate HTML report from saved analysis JSON
   trace       Capture and analyze a performance trace on-demand
   capture     Enrich a stored real-user interaction with a CDP flame-graph trace
+  fix         Autonomously measure → audit → fix → verify in a loop (requires --retries)
 
 Options (simulate):
   --url         URL to simulate (required)
@@ -129,6 +132,27 @@ Options (capture):
   --ai-provider  AI provider: anthropic | openai | gemini
   --ai-key       API key for AI provider
   --ai-model     Model name override
+
+Options (fix):
+  --url          Page URL to audit and fix (required)
+  --source       Path to your source directory — HTML/CSS/JS files to edit (required)
+  --retries      Number of fix-and-verify cycles to attempt (REQUIRED, no default)
+                 Each retry calls the AI and runs Playwright measurements.
+                 Recommended: 3–5 for typical issues, max 10 for complex pages.
+  --ai-provider  AI provider: anthropic | openai | gemini (required)
+  --ai-key       API key for the AI provider (required)
+  --ai-model     Model name override (optional)
+  --runs         Playwright runs per measurement pass (default: 3)
+  --network      Network profile: 4g | 3g (default: 4g)
+  --viewport     Viewport: desktop | mobile (default: desktop)
+
+Example:
+  vitalsage fix \\
+    --url http://localhost:5173 \\
+    --source ./src \\
+    --retries 5 \\
+    --ai-provider anthropic \\
+    --ai-key \$ANTHROPIC_API_KEY
 `.trim();
 
 async function main(): Promise<void> {
@@ -247,6 +271,47 @@ async function main(): Promise<void> {
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),
       ...(output     ? { output }     : {}),
+    });
+    return;
+  }
+
+  if (cmd === 'fix') {
+    const url        = getString(args, 'url');
+    const source     = getString(args, 'source');
+    const aiProvider = getString(args, 'aiProvider');
+    const aiKey      = getString(args, 'aiKey');
+    const retriesRaw = getString(args, 'retries');
+
+    // --retries is REQUIRED with no default — prevents unbounded token spend
+    if (!retriesRaw) {
+      printError('--retries <n> is required for the fix command.');
+      printError('Example: vitalsage fix --url http://localhost:5173 --source ./src --retries 3 --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY');
+      process.exit(1);
+    }
+    const retries = parseInt(retriesRaw, 10);
+    if (isNaN(retries) || retries < 1) {
+      printError('--retries must be a positive integer (e.g. --retries 3)');
+      process.exit(1);
+    }
+    if (!url)        { printError('--url is required');         process.exit(1); }
+    if (!source)     { printError('--source is required');      process.exit(1); }
+    if (!aiProvider) { printError('--ai-provider is required'); process.exit(1); }
+    if (!aiKey)      { printError('--ai-key is required');      process.exit(1); }
+
+    const network  = getString(args, 'network')  as '4g' | '3g' | undefined;
+    const viewport = getString(args, 'viewport') as 'desktop' | 'mobile' | undefined;
+    const aiModel  = getString(args, 'aiModel');
+
+    await runFix({
+      url,
+      source,
+      retries,
+      aiProvider,
+      aiKey,
+      ...(aiModel  ? { aiModel }  : {}),
+      ...(network  ? { network }  : {}),
+      ...(viewport ? { viewport } : {}),
+      runs: getNumber(args, 'runs', 3),
     });
     return;
   }
