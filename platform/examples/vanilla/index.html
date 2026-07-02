@@ -86,5 +86,24 @@
   </main>
 
   <script type="module" src="./vitalsage-init.js"></script>
+
+  <!-- FIX: task chunking — each slice runs for ≤ 40ms then yields back to the
+       browser with scheduler.postTask / setTimeout(0). No single long task,
+       so TBT stays at 0 and the browser stays responsive throughout. -->
+  <script>
+    (async function chunkedWork() {
+      let n = 0;
+      let remaining = 500;
+      const SLICE = 40; // ms — stays under the 50ms long-task threshold
+      while (remaining > 0) {
+        const t0 = performance.now();
+        while (performance.now() - t0 < SLICE) { n++; }
+        remaining -= SLICE;
+        // Yield: lets the browser handle paint, input, and other tasks.
+        await new Promise(r => setTimeout(r, 0));
+      }
+      window.__syntheticWork = n;
+    })();
+  </script>
 </body>
 </html>

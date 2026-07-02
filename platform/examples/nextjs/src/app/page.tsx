@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import DomBloat from '../components/DomBloat';
 
 export default function HomePage() {
   return (
@@ -53,6 +54,9 @@ export default function HomePage() {
           <li>Application → IndexedDB → vitalsage → sessions for locally stored reports.</li>
         </ul>
       </section>
+
+      {/* SYNTHETIC PERF ISSUE: 3 000 hidden DOM nodes — triggers domNodes >= 2500 rule */}
+      <DomBloat />
     </main>
   );
 }

@@ -1,7 +1,23 @@
 import { Link } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 
 export default function Home() {
+  const probeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // FIX: batch the single read first, then apply all writes in one pass —
+    // no interleaving, so the browser only layouts once.
+    const el = probeRef.current;
+    if (!el) return;
+    const w = el.offsetWidth;          // single read — one layout
+    for (let i = 0; i < 20; i++) {
+      el.style.setProperty(`--pad-${i}`, `${(w % 4) + i}px`); // CSS-var writes don't trigger layout
+    }
+    el.style.paddingLeft = '';
+  }, []);
+
   return (
+    <div ref={probeRef}>
     <main className="container">
       <section className="hero">
         <h1>VitalSage Demo — React</h1>
@@ -52,5 +68,6 @@ export default function Home() {
         </ul>
       </section>
     </main>
+    </div>
   );
 }

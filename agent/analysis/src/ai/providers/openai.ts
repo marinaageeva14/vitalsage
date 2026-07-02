@@ -4,19 +4,21 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export class OpenAIProvider implements AIProvider {
   readonly name = 'openai';
-  private apiKey: string;
-  private model:  string;
+  private apiKey:  string;
+  private model:   string;
+  private baseURL: string;
 
   constructor(config: { apiKey: string; model?: string }) {
-    this.apiKey = config.apiKey;
-    this.model  = config.model ?? 'gpt-4o';
+    this.apiKey  = config.apiKey;
+    this.model   = config.model ?? 'gpt-4o';
+    this.baseURL = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
   }
 
   async complete(req: AIRequest): Promise<AIResponse> {
     let attempt = 0;
     while (attempt < 3) {
       try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetch(`${this.baseURL}/chat/completions`, {
           method:  'POST',
           headers: {
             'Content-Type':  'application/json',
