@@ -35,7 +35,9 @@ const SKIP_DIRS = new Set([
   '.nuxt', '.output', '.svelte-kit', 'coverage', '.cache',
 ]);
 
-const MAX_FILES          = 20;
+// Walk collects more files than the AI sees; the fixer ranks them by
+// relevance to the finding and sends only the top slice.
+const MAX_FILES          = 60;
 const MAX_BYTES_PER_FILE = 25_000;   // 25 KB — keeps tokens manageable
 
 export async function readSourceFiles(dir: string): Promise<SourceFile[]> {

@@ -47,13 +47,47 @@ The <search> text must also be unique within the file: include enough
 surrounding context that it matches exactly one location.
 `.trim();
 
+/** Files the AI actually receives, after relevance ranking. */
+const MAX_PROMPT_FILES = 20;
+
+/**
+ * Rank source files by relevance to the finding. readdir order previously
+ * decided what the AI saw — on real projects the file containing the LCP
+ * image could be excluded while 20 irrelevant files filled the context.
+ */
+export function rankSourceFiles(files: SourceFile[], suggestion: Suggestion): SourceFile[] {
+  const text = `${suggestion.title} ${suggestion.detail} ${suggestion.codeExample?.before ?? ''}`;
+  const referenced = [...text.matchAll(/[\w\-/.]+\.(?:m?js|cjs|css|html?|jpe?g|png|webp|avif|svg|woff2?)/gi)]
+    .map(m => m[0].split('/').pop()!)
+    .filter(Boolean);
+  const wantsMarkup = suggestion.codeExample?.language === 'html'
+    || ['LCP', 'CLS', 'FCP'].includes(suggestion.metric);
+
+  return files
+    .map(f => {
+      let score = 0;
+      for (const name of referenced) {
+        if (f.path.endsWith(name))     score += 8;
+        if (f.content.includes(name))  score += 4;
+      }
+      if (wantsMarkup && /\.html?$/i.test(f.path)) score += 3;
+      if (/(^|\/)index\.html?$/i.test(f.path))     score += 2;
+      return { f, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .map(x => x.f);
+}
+
 export async function generateFixes(
   topSuggestion: Suggestion,
   domFindings:   DomFindings,
   sourceFiles:   SourceFile[],
   ai:            AIProvider,
+  /** Titles of fixes already tried and reverted — the AI must not repeat them. */
+  attempted:     string[] = [],
 ): Promise<FilePatch[]> {
-  const userPrompt = buildFixPrompt(topSuggestion, domFindings, sourceFiles);
+  const ranked     = rankSourceFiles(sourceFiles, topSuggestion).slice(0, MAX_PROMPT_FILES);
+  const userPrompt = buildFixPrompt(topSuggestion, domFindings, ranked, attempted);
 
   const response = await ai.complete({
     systemPrompt: FIX_SYSTEM_PROMPT,
@@ -69,8 +103,16 @@ function buildFixPrompt(
   suggestion:  Suggestion,
   dom:         DomFindings,
   sourceFiles: SourceFile[],
+  attempted:   string[] = [],
 ): string {
   const lines: string[] = [];
+
+  if (attempted.length > 0) {
+    lines.push('## Previously Attempted Fixes (REVERTED — produced no measurable improvement)');
+    for (const t of attempted) lines.push(`- ${t}`);
+    lines.push('Do NOT propose these again. Address the problem below with a different approach.');
+    lines.push('');
+  }
 
   lines.push('## Performance Problem to Fix');
   lines.push(`Agent: ${suggestion.agent} | Metric: ${suggestion.metric} | Severity: ${suggestion.severity}`);

@@ -272,7 +272,9 @@ export async function runFix(args: FixArgs): Promise<void> {
   // Findings already tried and reverted — without this, a reverted fix leaves
   // metrics unchanged, the same top issue returns, and the loop spins on the
   // identical patch until retries run out.
-  const attempted = new Set<string>();
+  const attempted       = new Set<string>();
+  const attemptedTitles: string[] = [];
+  const attemptRecords:  AttemptRecord[] = [];
   const useGit    = isGitRepo(args.source);
   if (useGit) dim('  Source is a git repository — accepted fixes will be committed.');
 
@@ -345,7 +347,7 @@ export async function runFix(args: FixArgs): Promise<void> {
     printInfo('  Generating fix with AI…');
     let patches;
     try {
-      patches = await generateFixes(top, domFindings, sourceFiles, ai);
+      patches = await generateFixes(top, domFindings, sourceFiles, ai, attemptedTitles);
     } catch (err) {
       printError(`AI fix generation failed: ${err instanceof Error ? err.message : String(err)}`);
       break;
@@ -401,6 +403,7 @@ export async function runFix(args: FixArgs): Promise<void> {
         );
         if (committed) printSuccess('  Committed fix to git');
       }
+      attemptRecords.push(makeRecord(attempt, top, patchResults, served, previousSnapshot, afterSnapshot, 'kept'));
       printSuccess(`✅  Improvement confirmed on attempt ${attempt}!`);
       printSnapshot('Baseline ', baseline);
       printSnapshot('Final    ', afterSnapshot);
@@ -411,6 +414,8 @@ export async function runFix(args: FixArgs): Promise<void> {
     // baseline and later attempts aren't measured against a degraded page.
     const restored = await restoreFiles(args.source, backup);
     attempted.add(top.id);
+    attemptedTitles.push(top.title);
+    attemptRecords.push(makeRecord(attempt, top, patchResults, served, previousSnapshot, afterSnapshot, 'reverted'));
     printWarning(`No improvement — reverted ${restored} file(s).`);
 
     if (attempt < args.retries) {
@@ -427,4 +432,58 @@ export async function runFix(args: FixArgs): Promise<void> {
   console.log('');
   console.log(`${DIM}Patches applied: ${totalApplied} · kept after validation: ${totalKept}${RESET}`);
   printSnapshot('Baseline', baseline);
+
+  // Machine-readable record of what was tried, applied, and reverted —
+  // the loop's audit trail (and the input a future CI integration consumes).
+  if (attemptRecords.length > 0) {
+    const artifactPath = `vitalsage-fix-report-${new Date().toISOString().slice(0, 10)}.json`;
+    const artifact = {
+      url:      args.url,
+      source:   args.source,
+      config:   { runs, network, viewport, retries: args.retries, aiProvider: args.aiProvider },
+      baseline: snapshotMetrics(baseline),
+      attempts: attemptRecords,
+      totals:   { applied: totalApplied, kept: totalKept },
+    };
+    try {
+      await writeFile(artifactPath, JSON.stringify(artifact, null, 2), 'utf8');
+      printInfo(`Run report written to ${artifactPath}`);
+    } catch { /* non-fatal */ }
+  }
+}
+
+// ─── run artifact helpers ────────────────────────────────────────────────────
+
+interface AttemptRecord {
+  attempt: number;
+  finding: { id: string; title: string; severity: string; metric: string };
+  patches: Array<{ file: string; description: string; applied: boolean; reason?: string | undefined }>;
+  patchServed: boolean;
+  before:  Record<string, number | null>;
+  after:   Record<string, number | null>;
+  verdict: 'kept' | 'reverted';
+}
+
+function snapshotMetrics(s: Snapshot): Record<string, number | null> {
+  return { lcp: s.lcp, fcp: s.fcp, cls: s.cls, inp: s.inp, ttfb: s.ttfb };
+}
+
+function makeRecord(
+  attempt: number,
+  finding: { id: string; title: string; severity: string; metric: string },
+  patches: Array<{ file: string; description: string; applied: boolean; reason?: string | undefined }>,
+  patchServed: boolean,
+  before:  Snapshot,
+  after:   Snapshot,
+  verdict: 'kept' | 'reverted',
+): AttemptRecord {
+  return {
+    attempt,
+    finding: { id: finding.id, title: finding.title, severity: finding.severity, metric: finding.metric },
+    patches: patches.map(p => ({ file: p.file, description: p.description, applied: p.applied, reason: p.reason })),
+    patchServed,
+    before:  snapshotMetrics(before),
+    after:   snapshotMetrics(after),
+    verdict,
+  };
 }
