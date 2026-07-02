@@ -7,6 +7,7 @@
  * threshold alerts the rules already surfaced — it finds things the rules miss.
  */
 import type { MetricDistribution, PageContext, TraceMetrics, Suggestion } from '@vitalsage/types';
+import type { LCPPhaseSummary, INPPhaseSummary, CLSSourceSummary } from '../aggregator/attribution.js';
 
 // ─── Shared types ────────────────────────────────────────────────────────────
 
@@ -107,8 +108,19 @@ export function buildLCPPrompt(
   sampleSize:  number,
   confidence:  string,
   rules:       Suggestion[],
+  phases?:     LCPPhaseSummary,
 ): string {
   const el = page.lcpElement;
+
+  const phaseSection = phases
+    ? `
+## LCP Phase Breakdown (MEASURED, median of ${phases.sampleCount} session(s) — do not guess phases, use these)
+  1. Time to first byte:      ${phases.timeToFirstByte      !== undefined ? Math.round(phases.timeToFirstByte)      + 'ms' : 'n/a'}
+  2. Resource load delay:     ${phases.resourceLoadDelay    !== undefined ? Math.round(phases.resourceLoadDelay)    + 'ms' : 'n/a'}
+  3. Resource load duration:  ${phases.resourceLoadDuration !== undefined ? Math.round(phases.resourceLoadDuration) + 'ms' : 'n/a'}
+  4. Element render delay:    ${phases.elementRenderDelay   !== undefined ? Math.round(phases.elementRenderDelay)   + 'ms' : 'n/a'}
+${phases.element ? `  Attributed element: ${phases.element}` : ''}`
+    : '';
 
   const lcpEl = el
     ? [
@@ -129,6 +141,7 @@ ${ttfb ? fmsDist(ttfb, 'TTFB') : ''}
 
 ## LCP Element
 ${lcpEl}
+${phaseSection}
 
 ## Resource hints present in the document
 ${page.hints?.length
@@ -148,7 +161,9 @@ ${ruleList(rules)}
 ## Your task — LCP specialist
 Focus on what the rules missed. Investigate:
 1. Is TTFB the primary bottleneck? If server time > 600ms, LCP cannot improve until that is fixed first.
+   ${phases ? 'Use the MEASURED phase breakdown above to identify the dominant phase — do not speculate.' : ''}
 2. Is the LCP element discovered late in the waterfall? Cross-correlate TTFB, render-blocking resources, and preload hints.
+   ${phases?.resourceLoadDelay !== undefined ? 'A high "resource load delay" phase means late discovery — preload/priority hints fix exactly this.' : ''}
 3. Are there cross-origin penalties (no preconnect, no early-hint) for the LCP resource?
 4. Is the LCP image responsive? If natural size >> display size, bandwidth is wasted.
 5. Could server-side rendering or streaming improve first-byte time for LCP text elements?
@@ -167,7 +182,14 @@ export function buildCLSPrompt(
   sampleSize: number,
   confidence: string,
   rules:      Suggestion[],
+  sources?:   CLSSourceSummary,
 ): string {
+  const sourceSection = sources
+    ? `
+## Shifted Elements (MEASURED across ${sources.sampleCount} session(s) — these are the actual shift sources, do not guess)
+${sources.topSources.map(s => `  ${s.element} — shifted in ${s.sessions} session(s), cumulative shift ${s.totalShift.toFixed(4)}`).join('\n')}`
+    : '';
+
   const unsizedImages = page.images.filter(i => !i.hasExplicitDimensions && i.isAboveFold);
   const badFonts      = page.fonts.filter(f => !f.isSystemFont && (f.display === 'auto' || f.display === 'block'));
   const webFonts      = page.fonts.filter(f => !f.isSystemFont && !f.isIconFont);
@@ -177,6 +199,7 @@ ${header(sampleSize, confidence)}
 
 ## CLS Distribution
 ${fmsDist(cls, 'CLS')}
+${sourceSection}
 
 ## Images (above-fold)
   Total above-fold images: ${page.images.filter(i => i.isAboveFold).length}
@@ -199,7 +222,7 @@ ${ruleList(rules)}
 ## Your task — CLS specialist
 CLS is caused by unexpected layout shifts. The rules check for unsized images and missing font-display.
 Go deeper and investigate:
-1. Dynamically injected content — cookie banners, ads, notifications, skeleton loaders. Is there a pattern in the DOM that suggests dynamic injection that pushes content down?
+1. ${sources ? 'The MEASURED shifted elements are listed above — trace each back to its cause (late image, injected banner, font swap) and propose the specific fix for that element.' : 'Dynamically injected content — cookie banners, ads, notifications, skeleton loaders. Is there a pattern in the DOM that suggests dynamic injection that pushes content down?'}
 2. Web fonts — even with font-display:swap, a large font metric difference between fallback and web font causes shift. Are the fonts size-adjusted?
 3. Animations — are any CSS transitions or JS animations using non-composited properties (top, left, width, height) instead of transform?
 4. Iframes or embeds — do any third-party embeds (social widgets, maps) resize themselves after load?
@@ -219,11 +242,22 @@ export function buildINPPrompt(
   sampleSize: number,
   confidence: string,
   rules:      Suggestion[],
+  phases?:    INPPhaseSummary,
 ): string {
   const syncThirdParty = page.scripts.filter(s => s.isThirdParty && s.position === 'head' && !s.isDeferred && !s.isAsync);
   const allThirdParty  = page.scripts.filter(s => s.isThirdParty);
   const mobileInp      = inp.byDevice.mobile?.p75;
   const desktopInp     = inp.byDevice.desktop?.p75;
+
+  const phaseSection = phases
+    ? `
+## INP Phase Breakdown (MEASURED, median of ${phases.sampleCount} session(s) — do not guess phases, use these)
+  Input delay:          ${phases.inputDelay         !== undefined ? Math.round(phases.inputDelay)         + 'ms' : 'n/a'}  (main thread busy when input arrived)
+  Processing duration:  ${phases.processingDuration !== undefined ? Math.round(phases.processingDuration) + 'ms' : 'n/a'}  (event handler execution)
+  Presentation delay:   ${phases.presentationDelay  !== undefined ? Math.round(phases.presentationDelay)  + 'ms' : 'n/a'}  (render after handlers)
+${phases.topTargets.length ? '  Slowest interaction targets:\n' + phases.topTargets.map(t => `    ${t.target} (${t.count} session(s))`).join('\n') : ''}
+${phases.interactionType ? `  Dominant interaction type: ${phases.interactionType}` : ''}`
+    : '';
 
   return `
 ${header(sampleSize, confidence)}
@@ -231,6 +265,7 @@ ${header(sampleSize, confidence)}
 ## INP Distribution
 ${fmsDist(inp, 'INP')}
 ${mobileInp && desktopInp ? `  Mobile/desktop ratio: ${(mobileInp / desktopInp).toFixed(2)}× (mobile worse)` : ''}
+${phaseSection}
 
 ## Scripts
   Total scripts: ${page.scripts.length}
@@ -251,7 +286,7 @@ INP measures interaction latency — the time from a user gesture to the next fr
 The rules flag mobile gaps and synchronous third-party scripts. Go deeper:
 1. Long tasks from first-party code — does DOM complexity, node count, or script count suggest heavy event handlers?
 2. scheduler.postTask / setTimeout(0) opportunities — could expensive work be yielded to let the browser respond sooner?
-3. Input delay vs processing time vs presentation delay — based on the INP value and device gap, which phase is likely dominant?
+3. ${phases ? 'The dominant INP phase is MEASURED above — target your suggestion at that phase specifically (input delay → break up long tasks; processing → optimize the named handler/target; presentation → reduce layout cost after handlers).' : 'Input delay vs processing time vs presentation delay — based on the INP value and device gap, which phase is likely dominant?'}
 4. Third-party analytics or tag managers that fire on every click — even async scripts can block the input callback.
 5. React/Vue/Angular hydration — does the framework timing suggest a hydration bottleneck before interactions are ready?
 

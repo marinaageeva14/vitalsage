@@ -17,7 +17,39 @@ export interface RawMetricValue {
   id:             string;
   navigationType: NavigationType;
   entries:        SerializablePerformanceEntry[];
+  /** Measured cause breakdown (web-vitals attribution build or simulator equivalent). */
+  attribution?:   MetricAttribution;
 }
+
+/** LCP phase breakdown — the four sequential phases sum to the LCP value. */
+export interface LCPAttribution {
+  timeToFirstByte?:      number;
+  resourceLoadDelay?:    number;
+  resourceLoadDuration?: number;
+  elementRenderDelay?:   number;
+  /** CSS-selector-ish description of the LCP element. */
+  element?:              string;
+  url?:                  string;
+}
+
+/** INP phase breakdown — input delay, handler time, presentation. */
+export interface INPAttribution {
+  inputDelay?:         number;
+  processingDuration?: number;
+  presentationDelay?:  number;
+  interactionTarget?:  string;
+  interactionType?:    string;
+  loadState?:          string;
+}
+
+export interface CLSAttribution {
+  largestShiftTarget?: string;
+  largestShiftValue?:  number;
+  largestShiftTime?:   number;
+  loadState?:          string;
+}
+
+export type MetricAttribution = LCPAttribution | INPAttribution | CLSAttribution;
 
 export interface SerializableRect {
   x?: number; y?: number; width?: number; height?: number;

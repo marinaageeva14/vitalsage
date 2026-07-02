@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { MetricsCollector } from '../../../src/collector/metrics.js';
 
 // Mock web-vitals — controlled callbacks
-vi.mock('web-vitals', () => {
+vi.mock('web-vitals/attribution', () => {
   const callbacks: Record<string, Array<(m: unknown) => void>> = {};
 
   const makeRegister = (name: string) => (cb: (m: unknown) => void) => {
@@ -24,13 +24,13 @@ vi.mock('web-vitals', () => {
 });
 
 async function getFireFn() {
-  const wv = await import('web-vitals');
+  const wv = await import('web-vitals/attribution');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (wv as any)._fire as (name: string, m: unknown) => void;
 }
 
 async function getResetFn() {
-  const wv = await import('web-vitals');
+  const wv = await import('web-vitals/attribution');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (wv as any)._reset as () => void;
 }

@@ -13,24 +13,66 @@ export const INJECTOR_SCRIPT = `
     return 'poor';
   }
 
+  function describeNode(node) {
+    if (!node || !node.tagName) return node && node.nodeName ? node.nodeName : 'unknown';
+    var cls = node.className ? '.' + String(node.className).trim().split(/\\s+/)[0] : '';
+    return node.tagName + (node.id ? '#' + node.id : '') + cls;
+  }
+
+  // LCP phase attribution — the same decomposition web-vitals/attribution
+  // provides for RUM: TTFB → resource load delay → load duration → render delay.
+  function lcpAttribution(entry) {
+    try {
+      var nav  = performance.getEntriesByType('navigation')[0];
+      var ttfb = nav ? Math.round(nav.responseStart) : 0;
+      var attr = { timeToFirstByte: ttfb };
+      if (entry.element) attr.element = describeNode(entry.element);
+      if (entry.url) {
+        attr.url = entry.url;
+        var res = performance.getEntriesByType('resource').find(function(r) { return r.name === entry.url; });
+        if (res) {
+          attr.resourceLoadDelay    = Math.round(Math.max(0, res.fetchStart - ttfb));
+          attr.resourceLoadDuration = Math.round(Math.max(0, res.responseEnd - res.fetchStart));
+          attr.elementRenderDelay   = Math.round(Math.max(0, entry.startTime - res.responseEnd));
+        }
+      } else {
+        attr.elementRenderDelay = Math.round(Math.max(0, entry.startTime - ttfb));
+      }
+      return attr;
+    } catch(e) { return undefined; }
+  }
+
   try {
     new PerformanceObserver(function(list) {
       var entries = list.getEntries();
       var last = entries[entries.length - 1];
       if (last) {
         var v = last.startTime;
-        window.__vitalsage_session.metrics.LCP = { name:'LCP', value:v, rating:rateMetric('LCP',v), delta:v, id:'sim-lcp', navigationType:'navigate', entries:[] };
+        var attr = lcpAttribution(last);
+        window.__vitalsage_session.metrics.LCP = { name:'LCP', value:v, rating:rateMetric('LCP',v), delta:v, id:'sim-lcp', navigationType:'navigate', entries:[], attribution: attr };
       }
     }).observe({ type:'largest-contentful-paint', buffered:true });
   } catch(e) {}
 
   var clsValue = 0;
+  var largestShift = null;
   try {
     new PerformanceObserver(function(list) {
       for (var entry of list.getEntries()) {
-        if (!entry.hadRecentInput) clsValue += entry.value;
+        if (entry.hadRecentInput) continue;
+        clsValue += entry.value;
+        if (!largestShift || entry.value > largestShift.value) {
+          var target = entry.sources && entry.sources.length && entry.sources[0].node
+            ? describeNode(entry.sources[0].node) : undefined;
+          largestShift = { value: entry.value, time: entry.startTime, target: target };
+        }
       }
-      window.__vitalsage_session.metrics.CLS = { name:'CLS', value:clsValue, rating:rateMetric('CLS',clsValue), delta:0, id:'sim-cls', navigationType:'navigate', entries:[] };
+      var attr = largestShift ? {
+        largestShiftValue: Math.round(largestShift.value * 10000) / 10000,
+        largestShiftTime:  Math.round(largestShift.time),
+        largestShiftTarget: largestShift.target,
+      } : undefined;
+      window.__vitalsage_session.metrics.CLS = { name:'CLS', value:clsValue, rating:rateMetric('CLS',clsValue), delta:0, id:'sim-cls', navigationType:'navigate', entries:[], attribution: attr };
     }).observe({ type:'layout-shift', buffered:true });
   } catch(e) {}
 
@@ -52,7 +94,15 @@ export const INJECTOR_SCRIPT = `
       for (var entry of list.getEntries()) {
         if (entry.duration > maxInp) {
           maxInp = entry.duration;
-          window.__vitalsage_session.metrics.INP = { name:'INP', value:maxInp, rating:rateMetric('INP',maxInp), delta:maxInp, id:'sim-inp', navigationType:'navigate', entries:[] };
+          // Same phase split web-vitals/attribution reports for RUM INP.
+          var attr = {
+            inputDelay:         Math.round(Math.max(0, entry.processingStart - entry.startTime)),
+            processingDuration: Math.round(Math.max(0, entry.processingEnd - entry.processingStart)),
+            presentationDelay:  Math.round(Math.max(0, entry.startTime + entry.duration - entry.processingEnd)),
+            interactionType:    entry.name,
+            interactionTarget:  entry.target ? describeNode(entry.target) : undefined,
+          };
+          window.__vitalsage_session.metrics.INP = { name:'INP', value:maxInp, rating:rateMetric('INP',maxInp), delta:maxInp, id:'sim-inp', navigationType:'navigate', entries:[], attribution: attr };
         }
       }
     }).observe({ type:'event', buffered:true, durationThreshold:16 });

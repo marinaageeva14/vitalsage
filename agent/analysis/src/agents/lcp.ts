@@ -2,6 +2,7 @@ import type { AgentContext, AgentName, MetricName } from '@vitalsage/types';
 import { BaseAgent, type RuleBasedResult, type AIClient } from './base.js';
 import { buildLCPPrompt, AI_SYSTEM_PROMPT } from '../ai/prompts.js';
 import { parseAIResponse } from '../ai/parser.js';
+import { aggregateLCPAttribution } from '../aggregator/attribution.js';
 
 export class LCPAgent extends BaseAgent {
   readonly name: AgentName = 'lcp';
@@ -110,6 +111,7 @@ export class LCPAgent extends BaseAgent {
         ctx.sampleSize,
         ctx.confidence,
         result.suggestions,
+        aggregateLCPAttribution(ctx.sessions),
       );
 
       const response = await ai.complete({

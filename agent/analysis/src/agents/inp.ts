@@ -2,6 +2,7 @@ import type { AgentContext, AgentName, MetricName } from '@vitalsage/types';
 import { BaseAgent, type RuleBasedResult, type AIClient } from './base.js';
 import { buildINPPrompt, AI_SYSTEM_PROMPT } from '../ai/prompts.js';
 import { parseAIResponse } from '../ai/parser.js';
+import { aggregateINPAttribution } from '../aggregator/attribution.js';
 
 export class INPAgent extends BaseAgent {
   readonly name: AgentName = 'inp';
@@ -86,6 +87,7 @@ export class INPAgent extends BaseAgent {
         ctx.sampleSize,
         ctx.confidence,
         result.suggestions,
+        aggregateINPAttribution(ctx.sessions),
       );
 
       const response = await ai.complete({

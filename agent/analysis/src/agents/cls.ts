@@ -2,6 +2,7 @@ import type { AgentContext, AgentName, MetricName } from '@vitalsage/types';
 import { BaseAgent, type RuleBasedResult, type AIClient } from './base.js';
 import { buildCLSPrompt, AI_SYSTEM_PROMPT } from '../ai/prompts.js';
 import { parseAIResponse } from '../ai/parser.js';
+import { aggregateCLSSources } from '../aggregator/attribution.js';
 
 export class CLSAgent extends BaseAgent {
   readonly name: AgentName = 'cls';
@@ -87,6 +88,7 @@ export class CLSAgent extends BaseAgent {
         ctx.sampleSize,
         ctx.confidence,
         result.suggestions,
+        aggregateCLSSources(ctx.sessions),
       );
 
       const response = await ai.complete({
