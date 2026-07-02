@@ -11,16 +11,25 @@ import type { MetricDistribution, PageContext, TraceMetrics, Suggestion } from '
 // ─── Shared types ────────────────────────────────────────────────────────────
 
 export const AI_SYSTEM_PROMPT = `
-You are a senior web performance engineer analyzing real-user measurement (RUM) data
-from a production website. You have access to Core Web Vitals distributions computed
-from real user sessions.
+You are a senior web performance engineer analyzing web performance measurement
+data — Core Web Vitals distributions and page context from real-user sessions,
+synthetic lab runs, or both. The data source is stated in each request; never
+describe synthetic lab data as real-user behaviour.
 
 Rules:
-- Every suggestion must reference specific numbers from the data provided
+- Every suggestion must reference specific numbers from the data provided.
+  Never introduce a number that does not appear in the request.
 - Do not repeat findings that are already listed in "Rule-based findings" — add new insights
 - Do not give generic advice — "optimize images" is not acceptable
 - Reference p75 values, affected session counts, and device breakdowns in your detail text
-- Severity must match the data: p75 LCP > 4000ms = critical, 2500–4000ms = warning
+- Severity must match the data (p75): LCP >4000ms = critical, 2500–4000ms = warning;
+  INP >500ms = critical, 200–500ms = warning; CLS >0.25 = critical, 0.1–0.25 = warning;
+  TTFB >1800ms = critical, 800–1800ms = warning; FCP >3000ms = critical, 1800–3000ms = warning
+- If the sample size is below 20 sessions or confidence is "low", cap severity at
+  "warning" and state the uncertainty in the detail text
+- If the data does not clearly support any additional finding, return an empty
+  <suggestions/> element. A truthful empty answer is strictly better than a
+  speculative one — you are never required to invent findings.
 - Format response ONLY as valid XML matching the schema provided
 - Do not add any text before or after the XML
 `.trim();
@@ -111,8 +120,6 @@ export function buildLCPPrompt(
       ].filter(Boolean).join('\n')
     : '  LCP element: not detected';
 
-  const preloads = page.resources.filter(r => r.initiatorType === 'link' && r.name.includes('preload'));
-
   return `
 ${header(sampleSize, confidence)}
 
@@ -122,10 +129,6 @@ ${ttfb ? fmsDist(ttfb, 'TTFB') : ''}
 
 ## LCP Element
 ${lcpEl}
-
-## Resource Hints in <head>
-  Preload tags: ${preloads.length}
-  Preconnect/dns-prefetch origins: ${page.resources.filter(r => r.name.includes('preconnect')).length}
 
 ## Render-blocking scripts delaying LCP
   Count: ${page.scripts.filter(s => s.isRenderBlocking).length}
@@ -145,7 +148,7 @@ Focus on what the rules missed. Investigate:
 4. Is the LCP image responsive? If natural size >> display size, bandwidth is wasted.
 5. Could server-side rendering or streaming improve first-byte time for LCP text elements?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -197,7 +200,7 @@ Go deeper and investigate:
 4. Iframes or embeds — do any third-party embeds (social widgets, maps) resize themselves after load?
 5. Late-arriving above-fold images without aspect-ratio CSS or explicit dimensions.
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -233,7 +236,7 @@ ${mobileInp && desktopInp ? `  Mobile/desktop ratio: ${(mobileInp / desktopInp).
 
 ## DOM complexity (affects event handler cost)
   DOM nodes: ${page.domNodeCount}
-  Event-heavy selectors: ${page.scripts.filter(s => !s.isThirdParty).length} first-party scripts
+  First-party scripts: ${page.scripts.filter(s => !s.isThirdParty).length}
 
 ## Rule-based findings already identified (do NOT repeat these)
 ${ruleList(rules)}
@@ -247,7 +250,7 @@ The rules flag mobile gaps and synchronous third-party scripts. Go deeper:
 4. Third-party analytics or tag managers that fire on every click — even async scripts can block the input callback.
 5. React/Vue/Angular hydration — does the framework timing suggest a hydration bottleneck before interactions are ready?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -293,7 +296,7 @@ Go deeper and investigate:
 4. Service Worker fetch handling overhead — if SW is active, is navigation preload enabled?
 5. Does the redirect chain suggest HTTP→HTTPS or www→non-www that could be eliminated at the DNS level?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -349,7 +352,7 @@ The rules flag the presence of blocking scripts and stylesheets. Go deeper:
 4. Is any blocking script a polyfill that modern browsers don't need? Could use module/nomodule pattern.
 5. Would inlining critical CSS for above-fold content and lazy-loading the full stylesheet improve FCP meaningfully given the p75 value?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -418,7 +421,7 @@ and obvious preconnect gaps. Go deeper:
 4. Could modulepreload for ES module entry points improve FCP/LCP?
 5. Are any existing preload hints wasted (preloading resources that are already in the critical path and discovered early)?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -477,7 +480,7 @@ Go deeper:
 4. Are below-fold images missing loading="lazy", unnecessarily consuming bandwidth before the LCP image finishes?
 5. Could image compression quality be tuned (e.g. WebP quality 80 vs 90) for the LCP image to reduce transfer size?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -534,7 +537,7 @@ The rules catch missing preload, missing crossorigin, and missing font-display. 
 4. Is unicode-range subsetting applied? Large fonts for Latin-only pages can be subsetted aggressively.
 5. Are variable fonts available that could replace multiple weight files with a single file?
 
-Generate 1-3 specific suggestions the rule-based layer did not catch.
+Generate 0-3 specific suggestions the rule-based layer did not catch. If nothing qualifies, return <suggestions/>.
 
 ${ANTHROPIC_OUTPUT_SCHEMA}
 `.trim();
@@ -548,12 +551,14 @@ export function buildTraceUserPrompt(
   trace:         TraceMetrics,
   sampleSize:    number,
   confidence:    string,
+  runProfile?:   string,
 ): string {
   return `
 ## Analysis Context
 - Sample size: ${sampleSize} sessions
 - Confidence: ${confidence}
 - Agent: trace (CPU / rendering profiler)
+${runProfile ? `- Run conditions: ${runProfile}` : ''}
 
 ## Core Web Vitals Distributions (p50 / p75 / p95)
 ${Object.entries(distributions)
@@ -600,7 +605,7 @@ Cross-correlate the trace breakdown with the Core Web Vitals to identify the roo
 3. Are the long tasks caused by JS execution, layout thrashing, or something else?
 4. Do the mobile/desktop CWV splits suggest this is a device-capability issue (high JS compile) or a network issue?
 
-Generate 2-4 specific, root-cause suggestions. Avoid generic advice — reference the actual
+Generate 0-4 specific, root-cause suggestions. If the trace shows no clear problem, return <suggestions/>. Avoid generic advice — reference the actual
 script names, function names, and millisecond values from the trace data above.
 
 ${TRACE_OUTPUT_SCHEMA}

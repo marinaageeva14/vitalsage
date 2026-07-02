@@ -254,12 +254,18 @@ export class TraceAgent extends BaseAgent {
     if (!ai || !tm) return result;
 
     try {
+      // Include the lab conditions so the model can judge whether the numbers
+      // are expected under throttling or genuinely alarming.
+      const sim = ctx.sessions.find(s => s.device.simulated)?.device.simulated;
+      const runProfile = sim ? `${sim.networkProfile} network · ${sim.viewportProfile} viewport (throttled lab run)` : undefined;
+
       const userPrompt = buildTraceUserPrompt(
         ctx.distributions,
         ctx.representativePage,
         tm,
         ctx.sampleSize,
         ctx.confidence,
+        runProfile,
       );
 
       const response = await ai.complete({

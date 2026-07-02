@@ -64,11 +64,19 @@ class RecordingAIClient implements AIClient {
   durationMs = 0;
   errors     = new Set<string>();
 
-  constructor(private inner: AIClient, private providerName: string) {}
+  constructor(
+    private inner:        AIClient,
+    private providerName: string,
+    /** Appended to every system prompt — tells the model what kind of data it sees. */
+    private contextNote:  string = '',
+  ) {}
 
   async complete(req: { systemPrompt: string; userPrompt: string; temperature?: number; maxTokens?: number }): Promise<{ content: string }> {
     this.calls++;
     const start = Date.now();
+    if (this.contextNote) {
+      req = { ...req, systemPrompt: `${req.systemPrompt}\n\n${this.contextNote}` };
+    }
     try {
       const res = await this.inner.complete(req);
       this.succeeded++;
@@ -181,7 +189,17 @@ export class AnalysisEngine {
     const eligible   = this.agents.filter(a => a.shouldRun(agentCtx));
     const ruleResults = eligible.map(a => ({ agent: a, result: a.analyze(agentCtx) }));
 
-    const recorder = this.aiClient ? new RecordingAIClient(this.aiClient, this.providerName) : null;
+    const syntheticCount = sessions.filter(s => s.synthetic).length;
+    const sourceNote =
+      syntheticCount === sessions.length
+        ? `Data source: synthetic lab runs ONLY (${sessions.length} Playwright session(s), throttled). ` +
+          `This is not real-user data — do not describe it as user behaviour, and treat ` +
+          `single-digit sample sizes as low-confidence.`
+        : syntheticCount > 0
+          ? `Data source: mixed — ${sessions.length - syntheticCount} real-user and ${syntheticCount} synthetic session(s).`
+          : `Data source: real-user (RUM) sessions (${sessions.length}).`;
+
+    const recorder = this.aiClient ? new RecordingAIClient(this.aiClient, this.providerName, sourceNote) : null;
     const enhanced = await Promise.allSettled(
       ruleResults.map(({ agent, result }) => agent.enhance(result, agentCtx, recorder))
     );
