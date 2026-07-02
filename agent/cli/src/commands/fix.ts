@@ -13,6 +13,8 @@
  * AI+measure cycles to allow. Each cycle calls the AI provider and runs multiple
  * Playwright sessions, so token/time cost scales linearly with retries.
  */
+import { tmpdir }               from 'node:os';
+import { join }                 from 'node:path';
 import { PlaywrightSimulator }  from 'vitalsage-simulator';
 import { AnalysisEngine, resolveProvider } from 'vitalsage-analysis';
 import type { AIConfig, SessionReport }    from '@vitalsage/types';
@@ -85,12 +87,13 @@ async function measure(
   viewport: 'desktop' | 'mobile',
 ): Promise<Snapshot> {
   const sim      = new PlaywrightSimulator();
-  const sessions = await sim.run({
+  const sessions = await sim.simulate({
     url,
     runs,
     networks:  [network],
     viewports: [viewport],
     captureTrace: false,
+    outputDir: join(tmpdir(), `vitalsage-fix-${Date.now()}`),
   });
   return {
     sessions,
@@ -161,9 +164,15 @@ export async function runFix(args: FixArgs): Promise<void> {
     banner(`\n🔄  Attempt ${attempt} / ${args.retries}`);
 
     // Step 1 — Audit
+    // minSamples: 1 — synthetic loop runs produce only a few sessions; the
+    // default of 50 would route every cycle to the insufficient-data report.
     printInfo('Step 1: Auditing page with all agents…');
-    const reports = await engine.analyze(previousSnapshot.sessions);
-    const allSuggestions = reports.flatMap(r => r.suggestions);
+    const reports = await engine.analyze(previousSnapshot.sessions, { minSamples: 1 });
+    // The insufficient-data placeholder is a report about the audit itself,
+    // not a page problem — never hand it to the fixer.
+    const allSuggestions = reports
+      .flatMap(r => r.suggestions)
+      .filter(s => s.id !== 'insufficient-data');
 
     if (allSuggestions.length === 0) {
       printSuccess('No suggestions — metrics are within acceptable ranges. Done!');
