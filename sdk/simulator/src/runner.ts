@@ -5,7 +5,7 @@ import { join }                   from 'node:path';
 import type { SimulatorConfig, SessionReport, NetworkProfile, ViewportProfile } from '@vitalsage/types';
 import { INJECTOR_SCRIPT }        from './injector.js';
 import { NETWORK_PROFILES, VIEWPORT_PROFILES } from './profiles.js';
-import { extractSessionReport }   from './extractor.js';
+import { extractSessionReport, collectPageContext } from './extractor.js';
 import { parseFunctionsFromProfile, parseScriptsFromProfile, type CpuProfileData } from './trace-parser.js';
 
 function generateId(): string {
@@ -108,6 +108,13 @@ export class PlaywrightSimulator {
       await mainCdp.send('Network.enable');
       await mainCdp.send('Network.emulateNetworkConditions', NETWORK_PROFILES[run.network]);
 
+      // Mobile means a slower CPU, not just a narrow screen — without
+      // throttling, "mobile" runs measure desktop CPU behind a mobile
+      // viewport and under-detect JS/rendering bottlenecks.
+      if (vp.isMobile) {
+        await mainCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      }
+
       if (config.captureTrace) {
         await mainCdp.send('Performance.enable');
         await mainCdp.send('Profiler.enable');
@@ -167,15 +174,35 @@ export class PlaywrightSimulator {
 
       await page.waitForTimeout(config.waitAfterLoad ?? 3000);
 
+      // Snapshot the page context at the load-settled point, BEFORE the
+      // interaction phase mutates the DOM (lazy-loaded content inflates
+      // domNodeCount and shifts above-fold classification).
+      const preContext = await page.evaluate(collectPageContext);
+
       if (config.interactAfterLoad !== false) {
         await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
         await page.waitForTimeout(500);
         await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
         await page.waitForTimeout(300);
-        const clickable = await page.$('button, a[href], [role="button"]');
+        // Interact without risking navigation: buttons only, never a[href] —
+        // clicking a link navigated away mid-measurement and destroyed the
+        // injected session state.
+        const urlBefore  = page.url();
+        const clickable  = await page.$('button:not([type="submit"]), [role="button"]');
         if (clickable) {
           await clickable.click({ timeout: 1000 }).catch(() => {});
-          await page.waitForTimeout(300);
+        } else {
+          // Synthetic tap so INP has at least one interaction to measure.
+          await page.evaluate(() => {
+            for (const type of ['pointerdown', 'pointerup'] as const) {
+              document.body.dispatchEvent(new PointerEvent(type, { bubbles: true }));
+            }
+            document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          }).catch(() => {});
+        }
+        await page.waitForTimeout(300);
+        if (page.url() !== urlBefore) {
+          console.warn('[VitalSage Simulator] Interaction caused navigation — metrics may be incomplete');
         }
       }
 
@@ -187,7 +214,7 @@ export class PlaywrightSimulator {
 
       return await extractSessionReport(
         page, url, run.network, run.viewport, generateId(),
-        config.captureTrace ?? false, mainCdp, screenshot, loadPhase,
+        config.captureTrace ?? false, mainCdp, screenshot, loadPhase, preContext,
       );
     } catch (err) {
       console.warn(`[VitalSage Simulator] Run failed (${run.network}/${run.viewport}/${run.route}):`, err);

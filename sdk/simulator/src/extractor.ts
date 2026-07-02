@@ -36,13 +36,15 @@ export async function extractSessionReport(
   cdpSession?:    CDPSession,
   screenshot?:    string,
   loadPhase?:     LoadPhaseSnapshot,
+  /** Context snapshotted at the load-settled point, before interactions mutate the DOM. */
+  preCollectedContext?: PageContext,
 ): Promise<SessionReport> {
   await page.waitForTimeout(500);
 
   const [session, navTiming, pageContext, userAgent] = await Promise.all([
     page.evaluate(() => window.__vitalsage_session),
     page.evaluate(extractNavTiming),
-    page.evaluate(collectPageContext),
+    preCollectedContext ?? page.evaluate(collectPageContext),
     page.evaluate(() => navigator.userAgent),
   ]);
 
@@ -87,7 +89,9 @@ export async function extractSessionReport(
       userAgent,
       viewport:            { width: viewport.width, height: viewport.height },
       devicePixelRatio:    viewport.deviceScaleFactor,
-      hardwareConcurrency: 4,
+      // Reflects the CPU throttle applied in the runner: mobile runs are
+      // 4×-throttled to approximate mid-range device capability.
+      hardwareConcurrency: viewportProfile === 'mobile' ? 4 : 8,
       deviceCategory:      viewportProfile === 'mobile' ? 'mobile' : viewportProfile === 'tablet' ? 'tablet' : 'desktop',
       connection:          { type: networkProfile === 'wifi' ? 'wifi' : networkProfile },
       simulated:           { networkProfile, viewportProfile },
@@ -124,7 +128,7 @@ function extractNavTiming(): NavigationTimingSnapshot {
 }
 
 // Runs inside the browser — collects PageContext
-function collectPageContext(): PageContext {
+export function collectPageContext(): PageContext {
   const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
 
   const lcpEntries = performance.getEntriesByType('largest-contentful-paint') as PerformancePaintTiming[];
