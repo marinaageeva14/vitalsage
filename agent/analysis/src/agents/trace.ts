@@ -275,7 +275,7 @@ export class TraceAgent extends BaseAgent {
         maxTokens:    1200,
       });
 
-      const aiSuggestions = parseAISuggestions(response.content, this.name);
+      const aiSuggestions = parseAISuggestions(response.content, this.name, 'LCP', userPrompt);
 
       // Merge: keep rule-based suggestions that the AI didn't duplicate,
       // then append AI suggestions. AI suggestions are appended after rules

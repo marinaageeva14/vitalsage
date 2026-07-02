@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { AgentName, MetricName, Suggestion, Severity, Effort } from '@vitalsage/types';
 import { generateSuggestionId } from '../utils/id.js';
+import { validateGrounding } from './grounding.js';
 
 const VALID_SEVERITIES = new Set<Severity>(['critical', 'warning', 'info']);
 const VALID_EFFORTS    = new Set<Effort>(['low', 'medium', 'high']);
@@ -30,6 +31,8 @@ export function parseAIResponse(
   xml:    string,
   agent:  AgentName,
   metric: MetricName,
+  /** When provided, suggestions are grounding-validated against this prompt text. */
+  groundAgainst?: string,
 ): Suggestion[] {
   const snippet = extractSuggestionsXml(xml);
   if (!snippet) return [];
@@ -50,7 +53,7 @@ export function parseAIResponse(
   // fast-xml-parser returns an array when multiple, object when single
   const items: RawSuggestion[] = Array.isArray(raw) ? raw as RawSuggestion[] : [raw as RawSuggestion];
 
-  return items
+  const parsed = items
     .map((el): Suggestion | null => {
       const title    = str(el, 'title');
       const severity = str(el, 'severity') as Severity;
@@ -94,6 +97,8 @@ export function parseAIResponse(
     })
     .filter((s): s is Suggestion => s !== null)
     .slice(0, 5);
+
+  return groundAgainst ? validateGrounding(parsed, groundAgainst).kept : parsed;
 }
 
 /**
@@ -105,6 +110,8 @@ export function parseAISuggestions(
   xml:           string,
   agent:         AgentName,
   defaultMetric: MetricName = 'LCP',
+  /** When provided, suggestions are grounding-validated against this prompt text. */
+  groundAgainst?: string,
 ): Suggestion[] {
   const snippet = extractSuggestionsXml(xml);
   if (!snippet) return [];
@@ -124,7 +131,7 @@ export function parseAISuggestions(
 
   const items: RawSuggestion[] = Array.isArray(raw) ? raw as RawSuggestion[] : [raw as RawSuggestion];
 
-  return items
+  const parsed = items
     .map((el): Suggestion | null => {
       const title    = str(el, 'title');
       const severity = str(el, 'severity') as Severity;
@@ -171,6 +178,8 @@ export function parseAISuggestions(
     })
     .filter((s): s is Suggestion => s !== null)
     .slice(0, 6);
+
+  return groundAgainst ? validateGrounding(parsed, groundAgainst).kept : parsed;
 }
 
 function str(el: RawSuggestion, key: string): string | undefined {

@@ -108,7 +108,7 @@ export class TTFBAgent extends BaseAgent {
         maxTokens:   1000,
       });
 
-      const aiSuggestions = parseAIResponse(response.content, this.name, 'TTFB');
+      const aiSuggestions = parseAIResponse(response.content, this.name, 'TTFB', userPrompt);
 
       const aiTitlesNorm = new Set(
         aiSuggestions.map(s => s.title.toLowerCase().slice(0, 40))

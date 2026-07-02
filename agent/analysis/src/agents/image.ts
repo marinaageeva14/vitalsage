@@ -104,7 +104,7 @@ export class ImageAgent extends BaseAgent {
         maxTokens:   1000,
       });
 
-      const aiSuggestions = parseAIResponse(response.content, this.name, 'LCP');
+      const aiSuggestions = parseAIResponse(response.content, this.name, 'LCP', userPrompt);
 
       const aiTitlesNorm = new Set(
         aiSuggestions.map(s => s.title.toLowerCase().slice(0, 40))
