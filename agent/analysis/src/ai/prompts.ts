@@ -130,6 +130,11 @@ ${ttfb ? fmsDist(ttfb, 'TTFB') : ''}
 ## LCP Element
 ${lcpEl}
 
+## Resource hints present in the document
+${page.hints?.length
+  ? page.hints.slice(0, 12).map(h => `  ${h.rel}${h.as ? `[as=${h.as}]` : ''} → ${h.href}${h.crossOrigin ? ' (crossorigin)' : ''}`).join('\n')
+  : '  (none)'}
+
 ## Render-blocking scripts delaying LCP
   Count: ${page.scripts.filter(s => s.isRenderBlocking).length}
   Blocking stylesheets: ${page.stylesheets.filter(s => s.isRenderBlocking).length}
@@ -379,7 +384,7 @@ export function buildResourceHintPrompt(
       .filter(o => o && o !== pageOrigin)
   )];
 
-  const preloadedResources = page.resources.filter(r => r.initiatorType === 'link');
+  const hints = page.hints ?? [];
 
   return `
 ${header(sampleSize, confidence)}
@@ -396,8 +401,8 @@ ${fmsDist(ttfb, 'TTFB')}
   fetchpriority: ${el?.fetchPriority ?? 'not set'}
   Third-party: ${el?.isThirdParty ? 'yes' : 'no'}
 
-## Existing preload/preconnect hints
-  Preloaded resources: ${preloadedResources.length}
+## Existing resource hints (${hints.length} total)
+${hints.slice(0, 12).map(h => `  ${h.rel}${h.as ? `[as=${h.as}]` : ''} → ${h.href}${h.crossOrigin ? ' (crossorigin)' : ''}`).join('\n') || '  (none)'}
   Third-party origins on page: ${thirdPartyOrigins.length}
   Origins: ${thirdPartyOrigins.slice(0, 8).join(', ') || 'none'}
 

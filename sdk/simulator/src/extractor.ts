@@ -155,20 +155,31 @@ function collectPageContext(): PageContext {
 
     ...(lastLcp?.element ? { lcpElement: (() => {
       const el   = lastLcp.element!;
-      const tag  = el.tagName.toLowerCase() as 'img' | 'text' | 'background-image' | 'video' | 'svg';
+      const tag  = el.tagName.toLowerCase();
       const src  = el instanceof HTMLImageElement ? el.currentSrc : (lastLcp.url ?? undefined);
       const rect = el.getBoundingClientRect();
       const nw   = el instanceof HTMLImageElement ? el.naturalWidth  : undefined;
       const nh   = el instanceof HTMLImageElement ? el.naturalHeight : undefined;
       const fp   = el instanceof HTMLImageElement ? (el.fetchPriority || undefined) : undefined;
       const ld   = el instanceof HTMLImageElement ? (el.loading || undefined) : undefined;
+      // Preloaded means a preload link for THIS resource exists — not any
+      // image preload on the page.
+      const isPreloaded = src
+        ? Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="preload"]'))
+            .some(l => { try { return new URL(l.href).pathname === new URL(src).pathname; } catch { return false; } })
+        : false;
+      const elementType =
+        tag === 'img'   ? 'img'   as const :
+        tag === 'video' ? 'video' as const :
+        tag === 'svg'   ? 'svg'   as const :
+        lastLcp.url     ? 'background-image' as const : 'text' as const;
       return {
         tagName:               el.tagName,
         ...(src ? { src } : {}),
         isThirdParty:          src ? (() => { try { return new URL(src).origin !== location.origin; } catch { return false; } })() : false,
         hasExplicitDimensions: el.hasAttribute('width') && el.hasAttribute('height'),
-        isPreloaded:           !!document.querySelector('link[rel="preload"][as="image"]'),
-        elementType:           tag === 'img' ? 'img' as const : 'text' as const,
+        isPreloaded,
+        elementType,
         displayWidth:          Math.round(rect.width),
         displayHeight:         Math.round(rect.height),
         ...(nw !== undefined ? { naturalWidth:  nw } : {}),
@@ -187,9 +198,11 @@ function collectPageContext(): PageContext {
         family: string; display: string; url?: string; isPreloaded: boolean;
         hasCrossOrigin: boolean; format?: string; isSystemFont: boolean; isIconFont: boolean;
       }> = [];
-      const preloadedHrefs = new Set(
+      // href → whether the preload link carries the crossorigin attribute
+      // (font preloads are CORS requests; missing crossorigin = double fetch).
+      const preloadLinks = new Map(
         Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="font"]'))
-          .map(l => l.href),
+          .map(l => [l.href, l.hasAttribute('crossorigin')] as const),
       );
       for (const sheet of Array.from(document.styleSheets)) {
         let rules: CSSRule[];
@@ -212,10 +225,9 @@ function collectPageContext(): PageContext {
             family,
             display,
             ...(resolved ? { url: resolved } : {}),
-            isPreloaded:    resolved ? preloadedHrefs.has(resolved) : false,
-            hasCrossOrigin: resolved
-              ? (() => { try { return new URL(resolved).origin !== location.origin; } catch { return false; } })()
-              : false,
+            isPreloaded:    resolved ? preloadLinks.has(resolved) : false,
+            hasCrossOrigin: resolved ? (preloadLinks.get(resolved) ?? false) : false,
+            ...(resolved ? { isCrossOrigin: (() => { try { return new URL(resolved).origin !== location.origin; } catch { return false; } })() } : {}),
             ...(formatMatch?.[1] ? { format: formatMatch[1] } : {}),
             isSystemFont: false,
             isIconFont:   /icon|material|awesome|glyphicon|ionicon/i.test(family),
@@ -249,31 +261,48 @@ function collectPageContext(): PageContext {
     }),
 
     scripts: Array.from(document.querySelectorAll('script[src]')).map(script => {
-      const s   = script as HTMLScriptElement;
-      const src = s.src;
+      const s      = script as HTMLScriptElement;
+      const src    = s.src;
+      const inHead = s.closest('head') !== null;
+      const entry  = src ? resources.find(r => r.name === src) : undefined;
       return {
         ...(src ? { src } : {}),
         isInline:         false,
         isDeferred:       s.defer,
         isAsync:          s.async,
         isModule:         s.type === 'module',
-        isRenderBlocking: !s.defer && !s.async && s.type !== 'module',
-        position:         s.closest('head') ? 'head' : 'body',
+        // Match the SDK definition: only head scripts block rendering.
+        isRenderBlocking: inHead && !s.defer && !s.async && s.type !== 'module',
+        ...(entry && entry.transferSize > 0 ? { size: entry.transferSize } : {}),
+        position:         inHead ? 'head' : 'body',
         isThirdParty:     src ? (() => { try { return new URL(src).origin !== location.origin; } catch { return false; } })() : false,
       } as const;
     }),
 
     stylesheets: Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(link => {
-      const l   = link as HTMLLinkElement;
-      const src = l.href;
+      const l     = link as HTMLLinkElement;
+      const src   = l.href;
+      const entry = src ? resources.find(r => r.name === src) : undefined;
       return {
         ...(src ? { href: src } : {}),
         isInline:         false,
         isRenderBlocking: !l.media || l.media === 'all',
         ...(l.media ? { media: l.media } : {}),
+        ...(entry && entry.transferSize > 0 ? { transferSize: entry.transferSize } : {}),
         isThirdParty:     src ? (() => { try { return new URL(src).origin !== location.origin; } catch { return false; } })() : false,
       };
     }),
+
+    hints: (['preload', 'preconnect', 'dns-prefetch', 'prefetch', 'modulepreload'] as const).flatMap(rel =>
+      Array.from(document.querySelectorAll<HTMLLinkElement>(`link[rel="${rel}"]`))
+        .filter(l => l.href)
+        .map(l => ({
+          rel,
+          href: l.href,
+          ...(l.getAttribute('as') ? { as: l.getAttribute('as')! } : {}),
+          ...(l.hasAttribute('crossorigin') ? { crossOrigin: true } : {}),
+        })),
+    ),
 
     navigationTiming: {
       redirectTime:    0, dnsTime:      0, tlsTime:         0, serverTime:  0,

@@ -355,7 +355,8 @@ describe('ContextCollector — fonts', () => {
     const font = collector.collect().fonts.find(f => f.family === 'MyFont');
     expect(font).toBeDefined();
     expect(font?.display).toBe('swap');
-    expect(font?.url).toBe('/fonts/my.woff2');
+    // Relative CSS urls are resolved to absolute so preload-link comparison works
+    expect(font?.url).toBe(new URL('/fonts/my.woff2', location.href).href);
     expect(font?.format).toBe('woff2');
     expect(font?.isSystemFont).toBe(false);
     expect(font?.isIconFont).toBe(false);
@@ -388,13 +389,36 @@ describe('ContextCollector — fonts', () => {
     expect(font?.isPreloaded).toBe(true);
   });
 
-  it('marks cross-origin font', () => {
+  it('marks cross-origin font via isCrossOrigin', () => {
     stubStyleSheets([makeFontSheet([{
       family: 'RemoteFont',
       src: 'url("https://fonts.gstatic.com/remote.woff2") format("woff2")',
     }])]);
 
     const font = collector.collect().fonts.find(f => f.family === 'RemoteFont');
+    // isCrossOrigin = URL origin differs from the page
+    expect(font?.isCrossOrigin).toBe(true);
+    // hasCrossOrigin = the preload link carries the crossorigin attribute;
+    // no preload exists here, so it must be false
+    expect(font?.hasCrossOrigin).toBe(false);
+  });
+
+  it('detects crossorigin attribute on the matching preload link', () => {
+    stubStyleSheets([makeFontSheet([{
+      family: 'CorsFont',
+      src: 'url("http://localhost/cors.woff2") format("woff2")',
+    }])]);
+
+    const preload = document.createElement('link');
+    preload.rel = 'preload';
+    preload.setAttribute('as', 'font');
+    preload.setAttribute('crossorigin', '');
+    preload.href = 'http://localhost/cors.woff2';
+    preload.dataset['test'] = '1';
+    document.head.appendChild(preload);
+
+    const font = collector.collect().fonts.find(f => f.family === 'CorsFont');
+    expect(font?.isPreloaded).toBe(true);
     expect(font?.hasCrossOrigin).toBe(true);
   });
 

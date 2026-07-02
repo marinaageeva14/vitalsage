@@ -1,8 +1,10 @@
 import type {
   PageContext, ResourceEntry, LCPElementDescriptor, ImageEntry,
-  FontEntry, ScriptEntry, StylesheetEntry, SerializablePerformanceEntry,
+  FontEntry, ScriptEntry, StylesheetEntry, ResourceHintEntry, SerializablePerformanceEntry,
 } from '@vitalsage/types';
 import { collectNavigationTiming } from './navigation-timing.js';
+
+const HINT_RELS = ['preload', 'preconnect', 'dns-prefetch', 'prefetch', 'modulepreload'] as const;
 
 export class ContextCollector {
 
@@ -19,8 +21,32 @@ export class ContextCollector {
       images:           this.collectImages(lcpElement),
       scripts:          this.collectScripts(),
       stylesheets:      this.collectStylesheets(),
+      hints:            this.collectHints(),
       navigationTiming: collectNavigationTiming(),
     };
+  }
+
+  private collectHints(): ResourceHintEntry[] {
+    const out: ResourceHintEntry[] = [];
+    for (const rel of HINT_RELS) {
+      for (const l of Array.from(document.querySelectorAll<HTMLLinkElement>(`link[rel="${rel}"]`))) {
+        if (!l.href) continue;
+        out.push({
+          rel,
+          href: l.href,
+          ...(l.getAttribute('as') ? { as: l.getAttribute('as')! } : {}),
+          ...(l.hasAttribute('crossorigin') ? { crossOrigin: true } : {}),
+        });
+      }
+    }
+    return out;
+  }
+
+  /** transferSize for an external resource, joined from the resource timeline. */
+  private resourceSize(url: string | undefined, resources: PerformanceResourceTiming[]): number | undefined {
+    if (!url) return undefined;
+    const entry = resources.find(r => r.name === url);
+    return entry && entry.transferSize > 0 ? entry.transferSize : undefined;
   }
 
   private collectResources(): ResourceEntry[] {
@@ -127,9 +153,12 @@ export class ContextCollector {
 
   private collectFonts(): FontEntry[] {
     const entries: FontEntry[] = [];
-    const preloadedUrls = new Set(
+    // Map absolute preload href → whether the link carries crossorigin.
+    // Font preloads are always CORS requests: a preload without crossorigin
+    // is fetched twice, so the attribute (not the URL origin) is the signal.
+    const preloadLinks = new Map(
       Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="font"]'))
-        .map(l => l.href),
+        .map(l => [l.href, l.hasAttribute('crossorigin')] as const),
     );
     const ICON_FONT_FAMILIES = ['Font Awesome', 'Material Icons', 'Ionicons', 'Glyphicons', 'Icons'];
 
@@ -144,16 +173,19 @@ export class ContextCollector {
           const srcRaw  = fontRule.style.getPropertyValue('src');
           const urlMatch    = /url\(["']?([^"')]+)["']?\)/.exec(srcRaw);
           const formatMatch = /format\(["']?([^"')]+)["']?\)/.exec(srcRaw);
-          const url = urlMatch?.[1];
+          // Resolve relative CSS urls against the stylesheet so comparisons
+          // with absolute link.href values match.
+          const url = urlMatch?.[1]
+            ? (() => { try { return new URL(urlMatch[1]!, sheet.href ?? location.href).href; } catch { return undefined; } })()
+            : undefined;
 
           entries.push({
             family,
             display,
             ...(url ? { url } : {}),
-            isPreloaded:    url ? preloadedUrls.has(url) : false,
-            hasCrossOrigin: url
-              ? (() => { try { return new URL(url).origin !== location.origin; } catch { return false; } })()
-              : false,
+            isPreloaded:    url ? preloadLinks.has(url) : false,
+            hasCrossOrigin: url ? (preloadLinks.get(url) ?? false) : false,
+            ...(url ? { isCrossOrigin: (() => { try { return new URL(url).origin !== location.origin; } catch { return false; } })() } : {}),
             ...(formatMatch?.[1] ? { format: formatMatch[1] } : {}),
             isSystemFont: false,
             isIconFont:   ICON_FONT_FAMILIES.some(f => family.includes(f)),
@@ -209,7 +241,8 @@ export class ContextCollector {
   }
 
   private collectScripts(): ScriptEntry[] {
-    const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script'));
+    const scripts   = Array.from(document.querySelectorAll<HTMLScriptElement>('script'));
+    const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
     return scripts.map(s => {
       const isModule         = s.type === 'module';
       const isDeferred       = s.defer || isModule;
@@ -217,6 +250,9 @@ export class ContextCollector {
       const isInline         = !s.src;
       const inHead           = s.closest('head') !== null;
       const isRenderBlocking = !isInline && inHead && !isAsync && !isDeferred;
+      const size = isInline
+        ? s.textContent?.length ?? 0
+        : this.resourceSize(s.src, resources);
 
       return {
         ...(s.src ? { src: s.src } : {}),
@@ -225,7 +261,7 @@ export class ContextCollector {
         isAsync,
         isModule,
         isRenderBlocking,
-        ...(isInline ? { size: s.textContent?.length ?? 0 } : {}),
+        ...(size !== undefined ? { size } : {}),
         position:    inHead ? 'head' : 'body',
         isThirdParty: s.src
           ? (() => { try { return new URL(s.src).origin !== location.origin; } catch { return false; } })()
@@ -238,15 +274,20 @@ export class ContextCollector {
     const links = Array.from(
       document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'),
     );
-    return links.map(l => ({
-      ...(l.href ? { href: l.href } : {}),
-      isInline:         false,
-      isRenderBlocking: !l.media || l.media === 'all' || l.media === 'screen',
-      ...(l.media ? { media: l.media } : {}),
-      isThirdParty: l.href
-        ? (() => { try { return new URL(l.href).origin !== location.origin; } catch { return false; } })()
-        : false,
-    }));
+    const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+    return links.map(l => {
+      const transferSize = this.resourceSize(l.href, resources);
+      return {
+        ...(l.href ? { href: l.href } : {}),
+        isInline:         false,
+        isRenderBlocking: !l.media || l.media === 'all' || l.media === 'screen',
+        ...(l.media ? { media: l.media } : {}),
+        ...(transferSize !== undefined ? { transferSize } : {}),
+        isThirdParty: l.href
+          ? (() => { try { return new URL(l.href).origin !== location.origin; } catch { return false; } })()
+          : false,
+      };
+    });
   }
 }
 

@@ -32,9 +32,19 @@ export interface PageContext {
   images:           ImageEntry[];
   scripts:          ScriptEntry[];
   stylesheets:      StylesheetEntry[];
+  /** Inventory of <link> resource hints present in the document. */
+  hints?:           ResourceHintEntry[];
   navigationTiming: NavigationTimingSnapshot;
   traceMetrics?:    import('./trace.js').TraceMetrics;
   screenshot?:      string;  // base64 JPEG, only present on captureTrace runs
+}
+
+export interface ResourceHintEntry {
+  rel:          'preload' | 'preconnect' | 'dns-prefetch' | 'prefetch' | 'modulepreload';
+  href:         string;
+  as?:          string;
+  /** The crossorigin attribute is present on the link tag. */
+  crossOrigin?: boolean;
 }
 
 export interface NavigationTimingSnapshot {
@@ -100,7 +110,14 @@ export interface FontEntry {
   display:        string;
   url?:           string;
   isPreloaded:    boolean;
+  /**
+   * The matching <link rel="preload"> carries the crossorigin attribute.
+   * Font preloads are always CORS requests — a preload without crossorigin
+   * is fetched twice. Only meaningful when isPreloaded is true.
+   */
   hasCrossOrigin: boolean;
+  /** The font file is served from a different origin than the page. */
+  isCrossOrigin?: boolean;
   format?:        string;
   isSystemFont:   boolean;
   isIconFont:     boolean;
