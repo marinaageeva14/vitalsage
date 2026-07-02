@@ -10,9 +10,8 @@ export function resolveProvider(config: AIConfig): AIProvider {
 
   const providerConfig = {
     apiKey: config.apiKey,
-    ...(config.model      ? { model:      config.model      } : {}),
-    ...(config.maxTokens  ? { maxTokens:  config.maxTokens  } : {}),
-    ...(config.temperature ? { temperature: config.temperature } : {}),
+    ...(config.model     ? { model:     config.model     } : {}),
+    ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}),
   };
 
   switch (config.provider) {

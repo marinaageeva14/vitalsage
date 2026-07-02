@@ -49,15 +49,70 @@ function resolveAgents(spec: EngineConfig['agents']): BaseAgent[] {
   return ALL_AGENTS.filter(a => (spec as string[]).includes(a.name));
 }
 
+/**
+ * Wraps the AI client so every enhance() call is measured. Agents swallow
+ * their own errors (falling back to rule-based results), which previously
+ * made "AI failed" indistinguishable from "AI found nothing" — the recorder
+ * sees the error before the agent's catch does.
+ */
+class RecordingAIClient implements AIClient {
+  calls      = 0;
+  succeeded  = 0;
+  failed     = 0;
+  timedOut   = 0;
+  tokensUsed = 0;
+  durationMs = 0;
+  errors     = new Set<string>();
+
+  constructor(private inner: AIClient, private providerName: string) {}
+
+  async complete(req: { systemPrompt: string; userPrompt: string; temperature?: number; maxTokens?: number }): Promise<{ content: string }> {
+    this.calls++;
+    const start = Date.now();
+    try {
+      const res = await this.inner.complete(req);
+      this.succeeded++;
+      const tokens = (res as { tokensUsed?: number }).tokensUsed;
+      if (typeof tokens === 'number') this.tokensUsed += tokens;
+      return res;
+    } catch (err) {
+      this.failed++;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof Error && err.name === 'AITimeoutError') this.timedOut++;
+      if (this.errors.size < 3) this.errors.add(msg);
+      throw err;
+    } finally {
+      this.durationMs += Date.now() - start;
+    }
+  }
+
+  telemetry(): import('@vitalsage/types').AIEnhancementTelemetry {
+    return {
+      provider:   this.providerName,
+      calls:      this.calls,
+      succeeded:  this.succeeded,
+      failed:     this.failed,
+      timedOut:   this.timedOut,
+      tokensUsed: this.tokensUsed,
+      durationMs: this.durationMs,
+      ...(this.errors.size ? { errors: [...this.errors] } : {}),
+    };
+  }
+}
+
 export class AnalysisEngine {
-  private agents:     BaseAgent[];
-  private aiClient:   AIClient | null;
-  private thresholds: ThresholdConfig;
+  private agents:       BaseAgent[];
+  private aiClient:     AIClient | null;
+  private providerName: string;
+  private thresholds:   ThresholdConfig;
 
   constructor(config: EngineConfig = {}) {
-    this.thresholds = mergeThresholds(config.thresholds);
-    this.aiClient   = config.ai ? resolveProvider(config.ai) : null;
-    this.agents     = resolveAgents(config.agents);
+    this.thresholds   = mergeThresholds(config.thresholds);
+    this.aiClient     = config.ai ? resolveProvider(config.ai) : null;
+    this.providerName = config.ai
+      ? (typeof config.ai.provider === 'string' ? config.ai.provider : config.ai.provider.name)
+      : 'none';
+    this.agents       = resolveAgents(config.agents);
   }
 
   async analyze(
@@ -126,8 +181,9 @@ export class AnalysisEngine {
     const eligible   = this.agents.filter(a => a.shouldRun(agentCtx));
     const ruleResults = eligible.map(a => ({ agent: a, result: a.analyze(agentCtx) }));
 
+    const recorder = this.aiClient ? new RecordingAIClient(this.aiClient, this.providerName) : null;
     const enhanced = await Promise.allSettled(
-      ruleResults.map(({ agent, result }) => agent.enhance(result, agentCtx, this.aiClient))
+      ruleResults.map(({ agent, result }) => agent.enhance(result, agentCtx, recorder))
     );
 
     const allSuggestions: Suggestion[] = [];
@@ -159,6 +215,7 @@ export class AnalysisEngine {
       analysisVersion: '__VERSION__',
       ...(screenshot   ? { screenshot }   : {}),
       ...(traceMetrics ? { traceMetrics } : {}),
+      ...(recorder     ? { ai: recorder.telemetry() } : {}),
     };
   }
 

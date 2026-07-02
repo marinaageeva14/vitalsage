@@ -10,6 +10,8 @@ export interface AIConfig {
   model?:       string;
   maxTokens?:   number;
   temperature?: number;
+  /** Per-request timeout for provider calls. Default: 60 000 ms. */
+  timeoutMs?:   number;
 }
 
 export interface NavigationConfig {

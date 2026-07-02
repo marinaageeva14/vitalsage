@@ -1,24 +1,25 @@
 import type { AIProvider, AIRequest, AIResponse } from '@vitalsage/types';
-
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+import { fetchWithTimeout, rateLimitDelay, sleep, DEFAULT_TIMEOUT_MS, AITimeoutError } from './http.js';
 
 export class OpenAIProvider implements AIProvider {
   readonly name = 'openai';
-  private apiKey:  string;
-  private model:   string;
-  private baseURL: string;
+  private apiKey:    string;
+  private model:     string;
+  private baseURL:   string;
+  private timeoutMs: number;
 
-  constructor(config: { apiKey: string; model?: string }) {
-    this.apiKey  = config.apiKey;
-    this.model   = config.model ?? 'gpt-4o';
-    this.baseURL = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+  constructor(config: { apiKey: string; model?: string; timeoutMs?: number }) {
+    this.apiKey    = config.apiKey;
+    this.model     = config.model ?? 'gpt-4o';
+    this.baseURL   = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async complete(req: AIRequest): Promise<AIResponse> {
     let attempt = 0;
     while (attempt < 3) {
       try {
-        const res = await fetch(`${this.baseURL}/chat/completions`, {
+        const res = await fetchWithTimeout(this.name, `${this.baseURL}/chat/completions`, {
           method:  'POST',
           headers: {
             'Content-Type':  'application/json',
@@ -33,11 +34,10 @@ export class OpenAIProvider implements AIProvider {
               { role: 'user',   content: req.userPrompt },
             ],
           }),
-        });
+        }, this.timeoutMs);
 
         if (res.status === 429) {
-          const delay = Math.min(1000 * 2 ** attempt + Math.random() * 500, 10000);
-          await sleep(delay);
+          await sleep(rateLimitDelay(res, attempt));
           attempt++;
           continue;
         }
@@ -54,7 +54,8 @@ export class OpenAIProvider implements AIProvider {
           ...(data.usage?.total_tokens !== undefined ? { tokensUsed: data.usage.total_tokens } : {}),
         };
       } catch (err) {
-        if (attempt >= 2) throw err;
+        // A timeout on the last attempt (or repeatedly) should surface as-is.
+        if (attempt >= 2 || err instanceof AITimeoutError) throw err;
         attempt++;
         await sleep(500 * attempt);
       }

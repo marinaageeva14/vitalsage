@@ -24,6 +24,23 @@ export interface AnalysisOptions {
   includeSyntheticOnly?: boolean;
 }
 
+/**
+ * Per-route telemetry for the AI enhancement pass. Makes AI failures visible:
+ * without this, a timed-out or unparseable AI call is indistinguishable from
+ * "the AI found nothing".
+ */
+export interface AIEnhancementTelemetry {
+  provider:   string;
+  calls:      number;
+  succeeded:  number;
+  failed:     number;
+  timedOut:   number;
+  tokensUsed: number;
+  durationMs: number;
+  /** Deduplicated error messages (capped). */
+  errors?:    string[];
+}
+
 export interface AnalysisReport {
   analysisId:      string;
   generatedAt:     number;
@@ -38,6 +55,8 @@ export interface AnalysisReport {
   analysisVersion: string;
   screenshot?:     string;
   traceMetrics?:   import('./trace.js').TraceMetrics;
+  /** Present when AI enhancement was configured for this analysis. */
+  ai?:             AIEnhancementTelemetry;
 }
 
 export interface AgentContext {
