@@ -62,11 +62,15 @@ export async function extractSessionReport(
   const viewport     = VIEWPORT_PROFILES[viewportProfile];
   const visitId      = generateId();
   const traceMetrics = captureTrace ? await collectTraceMetrics(page, cdpSession, loadPhase) : undefined;
-  const extras = {
+  const finalPage = {
+    ...pageContext,
+    // collectPageContext() runs in the page and returns zeroed navigation
+    // timing; the real breakdown is extracted separately above. Merge it so
+    // downstream consumers (TTFB agent, AI prompts) see actual values.
+    navigationTiming: navTiming,
     ...(traceMetrics ? { traceMetrics } : {}),
     ...(screenshot   ? { screenshot }   : {}),
   };
-  const finalPage = Object.keys(extras).length ? { ...pageContext, ...extras } : pageContext;
 
   return {
     sessionId,
@@ -174,14 +178,52 @@ function collectPageContext(): PageContext {
       };
     })() } : {}),
 
-    fonts: Array.from(document.fonts as unknown as Iterable<FontFace>).map(font => ({
-      family:         font.family.replace(/['"]/g, '').trim(),
-      display:        'auto',
-      isPreloaded:    false,
-      hasCrossOrigin: false,
-      isSystemFont:   false,
-      isIconFont:     /icon|material|awesome/i.test(font.family),
-    })),
+    // Walk CSSFontFaceRule declarations for real font-display / preload /
+    // origin data. Previously these fields were hardcoded (display:'auto',
+    // isPreloaded:false), which made the FontAgent flag FOIT on every
+    // synthetic run regardless of the actual page.
+    fonts: (() => {
+      const out: Array<{
+        family: string; display: string; url?: string; isPreloaded: boolean;
+        hasCrossOrigin: boolean; format?: string; isSystemFont: boolean; isIconFont: boolean;
+      }> = [];
+      const preloadedHrefs = new Set(
+        Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="font"]'))
+          .map(l => l.href),
+      );
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules: CSSRule[];
+        try { rules = Array.from(sheet.cssRules ?? []); }
+        catch { continue; }  // cross-origin stylesheet — SecurityError
+        for (const rule of rules) {
+          if (rule.type !== CSSRule.FONT_FACE_RULE) continue;
+          const fr      = rule as CSSFontFaceRule;
+          const family  = fr.style.getPropertyValue('font-family').replace(/["']/g, '').trim();
+          const display = fr.style.getPropertyValue('font-display').trim() || 'auto';
+          const srcRaw  = fr.style.getPropertyValue('src');
+          const urlMatch    = /url\(["']?([^"')]+)["']?\)/.exec(srcRaw);
+          const formatMatch = /format\(["']?([^"')]+)["']?\)/.exec(srcRaw);
+          // Resolve relative CSS urls against the stylesheet href so the
+          // preload comparison (absolute link.href) actually matches.
+          const resolved = urlMatch?.[1]
+            ? (() => { try { return new URL(urlMatch[1]!, sheet.href ?? location.href).href; } catch { return undefined; } })()
+            : undefined;
+          out.push({
+            family,
+            display,
+            ...(resolved ? { url: resolved } : {}),
+            isPreloaded:    resolved ? preloadedHrefs.has(resolved) : false,
+            hasCrossOrigin: resolved
+              ? (() => { try { return new URL(resolved).origin !== location.origin; } catch { return false; } })()
+              : false,
+            ...(formatMatch?.[1] ? { format: formatMatch[1] } : {}),
+            isSystemFont: false,
+            isIconFont:   /icon|material|awesome|glyphicon|ionicon/i.test(family),
+          });
+        }
+      }
+      return out;
+    })(),
 
     images: Array.from(document.querySelectorAll('img')).map(img => {
       const rect = img.getBoundingClientRect();
