@@ -481,7 +481,7 @@ curl -N "http://localhost:3001/api/audit?app=vanilla" | \
 **AI provider auto-detection** (checked in order at server startup):
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...   # → claude-sonnet-4-20250514
+ANTHROPIC_API_KEY=sk-ant-...   # → claude-sonnet-5
 OPENAI_API_KEY=sk-...          # → gpt-4o
 GEMINI_API_KEY=...             # → gemini-1.5-pro
 ```

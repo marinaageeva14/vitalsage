@@ -10,7 +10,7 @@ export class AnthropicProvider implements AIProvider {
 
   constructor(config: { apiKey: string; model?: string; timeoutMs?: number }) {
     this.apiKey    = config.apiKey;
-    this.model     = config.model ?? 'claude-sonnet-4-20250514';
+    this.model     = config.model ?? 'claude-sonnet-5';
     this.baseURL   = (process.env['ANTHROPIC_BASE_URL'] ?? 'https://api.anthropic.com').replace(/\/$/, '');
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }

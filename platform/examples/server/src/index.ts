@@ -240,7 +240,7 @@ app.patch('/api/interaction/:id/trace', (req, res) => {
 // findings back via Server-Sent Events (SSE) as each route is analysed.
 //
 // AI enhancement is automatically enabled when an API key env var is set:
-//   ANTHROPIC_API_KEY   → claude-sonnet-4-20250514
+//   ANTHROPIC_API_KEY   → claude-sonnet-5
 //   OPENAI_API_KEY      → gpt-4o
 //   GEMINI_API_KEY      → gemini-1.5-pro
 //
