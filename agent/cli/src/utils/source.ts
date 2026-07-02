@@ -102,7 +102,8 @@ export async function applyPatches(
       continue;
     }
 
-    if (!original.includes(patch.search)) {
+    const occurrences = original.split(patch.search).length - 1;
+    if (occurrences === 0) {
       results.push({
         file:        patch.file,
         description: patch.description,
@@ -111,8 +112,19 @@ export async function applyPatches(
       });
       continue;
     }
+    if (occurrences > 1) {
+      results.push({
+        file:        patch.file,
+        description: patch.description,
+        applied:     false,
+        reason:      `Search string matches ${occurrences} locations in ${patch.file} — ambiguous`,
+      });
+      continue;
+    }
 
-    const updated = original.replace(patch.search, patch.replace);
+    // split/join = literal replacement. String.replace() would interpret
+    // $-patterns ($&, $1…) in the AI-generated replacement text.
+    const updated = original.split(patch.search).join(patch.replace);
     try {
       await writeFile(fullPath, updated, 'utf8');
       results.push({

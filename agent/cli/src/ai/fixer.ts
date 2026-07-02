@@ -36,10 +36,15 @@ Output schema:
   <fix>
     <file>relative/path/to/file.html</file>
     <description>One sentence: what is being changed and why it improves performance</description>
-    <search>exact text from the file to find and replace</search>
-    <replace>the replacement text</replace>
+    <search><![CDATA[exact text from the file to find and replace]]></search>
+    <replace><![CDATA[the replacement text]]></replace>
   </fix>
 </fixes>
+
+CRITICAL: <search> and <replace> content MUST be wrapped in <![CDATA[ ... ]]> —
+they contain HTML/JS whose angle brackets would otherwise break the XML.
+The <search> text must also be unique within the file: include enough
+surrounding context that it matches exactly one location.
 `.trim();
 
 export async function generateFixes(

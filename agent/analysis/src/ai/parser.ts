@@ -11,14 +11,32 @@ const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false });
 
 type RawSuggestion = Record<string, unknown>;
 
+/**
+ * Isolate the <suggestions> document from whatever surrounds it. Models
+ * routinely wrap output in markdown fences or add prose despite
+ * instructions; parsing the raw response then fails and every suggestion
+ * is silently lost.
+ */
+function extractSuggestionsXml(raw: string): string | null {
+  const unfenced = raw.replace(/```(?:xml)?/g, '');
+  if (/<suggestions\s*\/>/.test(unfenced)) return '<suggestions/>';
+  const start = unfenced.indexOf('<suggestions');
+  const end   = unfenced.lastIndexOf('</suggestions>');
+  if (start === -1 || end === -1 || end < start) return null;
+  return unfenced.slice(start, end + '</suggestions>'.length);
+}
+
 export function parseAIResponse(
   xml:    string,
   agent:  AgentName,
   metric: MetricName,
 ): Suggestion[] {
+  const snippet = extractSuggestionsXml(xml);
+  if (!snippet) return [];
+
   let root: Record<string, unknown>;
   try {
-    root = parser.parse(xml) as Record<string, unknown>;
+    root = parser.parse(snippet) as Record<string, unknown>;
   } catch {
     return [];
   }
@@ -88,9 +106,12 @@ export function parseAISuggestions(
   agent:         AgentName,
   defaultMetric: MetricName = 'LCP',
 ): Suggestion[] {
+  const snippet = extractSuggestionsXml(xml);
+  if (!snippet) return [];
+
   let root: Record<string, unknown>;
   try {
-    root = parser.parse(xml) as Record<string, unknown>;
+    root = parser.parse(snippet) as Record<string, unknown>;
   } catch {
     return [];
   }

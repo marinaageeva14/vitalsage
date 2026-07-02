@@ -35,12 +35,15 @@ export const ANTHROPIC_OUTPUT_SCHEMA = `
     <impact>Specific estimated improvement e.g. "~200-400ms LCP reduction at p75"</impact>
     <confidence>0.0-1.0</confidence>
     <affectedPercent>0.0-1.0</affectedPercent>
-    <beforeCode>optional code snippet</beforeCode>
-    <afterCode>optional code snippet</afterCode>
+    <beforeCode><![CDATA[optional code snippet]]></beforeCode>
+    <afterCode><![CDATA[optional code snippet]]></afterCode>
     <codeLanguage>html|javascript|css|http|bash</codeLanguage>
     <learnMore>https://... (optional)</learnMore>
   </suggestion>
 </suggestions>
+
+IMPORTANT: always wrap beforeCode/afterCode content in <![CDATA[ ... ]]> —
+HTML tags inside them break the XML otherwise.
 `.trim();
 
 export const TRACE_OUTPUT_SCHEMA = `
@@ -53,12 +56,15 @@ export const TRACE_OUTPUT_SCHEMA = `
     <effort>low|medium|high</effort>
     <impact>Specific estimated improvement referencing the trace values e.g. "~300ms LCP from splitting main.js"</impact>
     <confidence>0.0-1.0</confidence>
-    <beforeCode>optional code snippet showing the problematic pattern</beforeCode>
-    <afterCode>optional code snippet showing the fix</afterCode>
+    <beforeCode><![CDATA[optional code snippet showing the problematic pattern]]></beforeCode>
+    <afterCode><![CDATA[optional code snippet showing the fix]]></afterCode>
     <codeLanguage>html|javascript|css|http|bash</codeLanguage>
     <learnMore>https://... (optional)</learnMore>
   </suggestion>
 </suggestions>
+
+IMPORTANT: always wrap beforeCode/afterCode content in <![CDATA[ ... ]]> —
+HTML tags inside them break the XML otherwise.
 `.trim();
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
