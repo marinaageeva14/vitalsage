@@ -142,7 +142,7 @@ Options (fix):
   --ai-provider  AI provider: anthropic | openai | gemini (required)
   --ai-key       API key for the AI provider (required)
   --ai-model     Model name override (optional)
-  --runs         Playwright runs per measurement pass (default: 3)
+  --runs         Playwright runs per measurement pass (default: 5)
   --network      Network profile: 4g | 3g (default: 4g)
   --viewport     Viewport: desktop | mobile (default: desktop)
 
@@ -311,7 +311,7 @@ async function main(): Promise<void> {
       ...(aiModel  ? { aiModel }  : {}),
       ...(network  ? { network }  : {}),
       ...(viewport ? { viewport } : {}),
-      runs: getNumber(args, 'runs', 3),
+      runs: getNumber(args, 'runs', 5),
     });
     return;
   }

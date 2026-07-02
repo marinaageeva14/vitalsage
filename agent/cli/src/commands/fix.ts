@@ -55,14 +55,17 @@ function dim(msg: string): void {
   console.log(`${DIM}${msg}${RESET}`);
 }
 
-// p75 over an array of session metric values
-function p75(values: number[]): number | null {
+// Median over an array of session metric values. With the small run counts
+// used here (3–9), "p75" degenerated to the maximum — the noisiest possible
+// estimator. The median is far more stable at these sample sizes.
+function median(values: number[]): number | null {
   const sorted = values.filter(v => v > 0).sort((a, b) => a - b);
   if (!sorted.length) return null;
-  return sorted[Math.ceil(sorted.length * 0.75) - 1]!;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-function extractP75(sessions: SessionReport[], metric: 'LCP' | 'FCP' | 'CLS' | 'INP' | 'TTFB'): number | null {
+function extractMedian(sessions: SessionReport[], metric: 'LCP' | 'FCP' | 'CLS' | 'INP' | 'TTFB'): number | null {
   const vals = sessions
     .map(s => {
       const m = s.metrics[metric];
@@ -70,7 +73,7 @@ function extractP75(sessions: SessionReport[], metric: 'LCP' | 'FCP' | 'CLS' | '
       return (m as { value?: number }).value ?? null;
     })
     .filter((v): v is number => v !== null);
-  return p75(vals);
+  return median(vals);
 }
 
 interface Snapshot {
@@ -99,11 +102,11 @@ async function measure(
   });
   return {
     sessions,
-    lcp:  extractP75(sessions, 'LCP'),
-    fcp:  extractP75(sessions, 'FCP'),
-    cls:  extractP75(sessions, 'CLS'),
-    inp:  extractP75(sessions, 'INP'),
-    ttfb: extractP75(sessions, 'TTFB'),
+    lcp:  extractMedian(sessions, 'LCP'),
+    fcp:  extractMedian(sessions, 'FCP'),
+    cls:  extractMedian(sessions, 'CLS'),
+    inp:  extractMedian(sessions, 'INP'),
+    ttfb: extractMedian(sessions, 'TTFB'),
   };
 }
 
@@ -171,29 +174,80 @@ function gitCommitFixes(dir: string, files: string[], message: string): boolean 
   }
 }
 
-function isImprovement(before: Snapshot, after: Snapshot): boolean {
-  // Count metrics that improved (lower = better for all CWV)
-  let improved = 0;
-  let degraded = 0;
-  const pairs: Array<[number | null, number | null]> = [
-    [before.lcp,  after.lcp],
-    [before.fcp,  after.fcp],
-    [before.cls,  after.cls],
-    [before.inp,  after.inp],
-    [before.ttfb, after.ttfb],
-  ];
-  for (const [b, a] of pairs) {
-    if (b === null || a === null) continue;
-    if (a < b * 0.97) improved++;   // >= 3% reduction counts
-    if (a > b * 1.03) degraded++;
+type MetricKey = 'lcp' | 'fcp' | 'cls' | 'inp' | 'ttfb';
+
+// Run-to-run noise floors. Deltas smaller than max(rel × before, abs) are
+// treated as noise — observed variance on real pages is far above the old
+// ±3% gate (e.g. +49% LCP between identical runs), which made verdicts
+// coin flips.
+const NOISE_FLOORS: Record<MetricKey, { rel: number; abs: number }> = {
+  lcp:  { rel: 0.10, abs: 100  },
+  fcp:  { rel: 0.10, abs: 50   },
+  cls:  { rel: 0,    abs: 0.02 },
+  inp:  { rel: 0.20, abs: 40   },
+  ttfb: { rel: 0.15, abs: 50   },
+};
+
+/** -1 improved beyond floor · 0 within noise · 1 regressed beyond floor */
+function compareMetric(key: MetricKey, before: number | null, after: number | null): -1 | 0 | 1 {
+  if (before === null || after === null) return 0;
+  const floor = Math.max(NOISE_FLOORS[key].rel * before, NOISE_FLOORS[key].abs);
+  if (after <= before - floor) return -1;
+  if (after >= before + floor) return 1;
+  return 0;
+}
+
+/**
+ * A fix is accepted only if the metric it targeted improved beyond its noise
+ * floor AND nothing else regressed beyond its floor. The previous any-metric
+ * vote let a TTFB fix be "validated" by INP noise.
+ */
+function isImprovement(before: Snapshot, after: Snapshot, targetMetric?: string): boolean {
+  const keys: MetricKey[] = ['lcp', 'fcp', 'cls', 'inp', 'ttfb'];
+  const verdicts = Object.fromEntries(
+    keys.map(k => [k, compareMetric(k, before[k], after[k])])
+  ) as Record<MetricKey, -1 | 0 | 1>;
+
+  if (keys.some(k => verdicts[k] === 1)) return false;
+
+  const target = targetMetric?.toLowerCase() as MetricKey | undefined;
+  if (target && target in verdicts && before[target] !== null) {
+    return verdicts[target] === -1;
   }
-  return improved > degraded && improved > 0;
+  // No measurable target metric — fall back to "anything improved, nothing regressed".
+  return keys.some(k => verdicts[k] === -1);
+}
+
+/**
+ * Wait until the served page reflects an applied HTML patch before
+ * re-measuring — against a dev server, HMR/rebuild latency can otherwise
+ * cause the "after" snapshot to measure the old code.
+ */
+async function confirmPatchServed(
+  url:       string,
+  patches:   Array<{ file: string; replace: string }>,
+  timeoutMs = 15_000,
+): Promise<boolean> {
+  const htmlPatch = patches.find(p => /\.html?$/i.test(p.file) && p.replace.trim().length >= 10);
+  if (!htmlPatch) return true;   // nothing verifiable in the served markup
+
+  const needle   = htmlPatch.replace.trim().slice(0, 60);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res  = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const html = await res.text();
+      if (html.includes(needle)) return true;
+    } catch { /* server restarting — keep polling */ }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return false;
 }
 
 // ─── main command ────────────────────────────────────────────────────────────
 
 export async function runFix(args: FixArgs): Promise<void> {
-  const runs     = args.runs     ?? 3;
+  const runs     = args.runs     ?? 5;
   const network  = args.network  ?? '4g';
   const viewport = args.viewport ?? 'desktop';
 
@@ -323,15 +377,19 @@ export async function runFix(args: FixArgs): Promise<void> {
       break;
     }
 
-    // Step 4 — Re-measure and compare
+    // Step 4 — Re-measure and compare (after confirming the change is served)
+    const served = await confirmPatchServed(args.url, patches);
+    if (!served) {
+      printWarning('  Served page does not reflect the patch yet (rebuild lag?) — measuring anyway.');
+    }
     printInfo(`Step 4: Re-measuring after fix (${runs} run(s))…`);
     const afterSnapshot = await measure(args.url, runs, network, viewport);
 
     printSnapshot('Before fix', previousSnapshot);
     printSnapshot('After fix ', afterSnapshot);
 
-    // Step 5 — Keep or revert
-    if (isImprovement(previousSnapshot, afterSnapshot)) {
+    // Step 5 — Keep or revert. The fix must move the metric it targeted.
+    if (isImprovement(previousSnapshot, afterSnapshot, top.metric)) {
       totalKept += appliedCount;
       if (useGit) {
         const files     = patchResults.filter(r => r.applied).map(r => r.file);
