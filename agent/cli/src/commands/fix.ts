@@ -15,6 +15,8 @@
  */
 import { tmpdir }               from 'node:os';
 import { join }                 from 'node:path';
+import { readFile, writeFile }  from 'node:fs/promises';
+import { execFileSync }         from 'node:child_process';
 import { PlaywrightSimulator }  from 'vitalsage-simulator';
 import { AnalysisEngine, resolveProvider } from 'vitalsage-analysis';
 import type { AIConfig, SessionReport }    from '@vitalsage/types';
@@ -115,6 +117,60 @@ function printSnapshot(label: string, snap: Snapshot): void {
   dim(`  ${label}: LCP=${formatMetric('LCP', snap.lcp)}  FCP=${formatMetric('FCP', snap.fcp)}  CLS=${formatMetric('CLS', snap.cls)}  INP=${formatMetric('INP', snap.inp)}  TTFB=${formatMetric('TTFB', snap.ttfb)}`);
 }
 
+// ─── rollback helpers ────────────────────────────────────────────────────────
+
+/** Snapshot the current contents of every file a patch set touches. */
+async function backupFiles(
+  sourceDir: string,
+  files:     string[],
+): Promise<Map<string, string>> {
+  const backup = new Map<string, string>();
+  for (const file of new Set(files)) {
+    try {
+      backup.set(file, await readFile(join(sourceDir, file), 'utf8'));
+    } catch {
+      // File the AI referenced but doesn't exist — applyPatches reports it.
+    }
+  }
+  return backup;
+}
+
+async function restoreFiles(
+  sourceDir: string,
+  backup:    Map<string, string>,
+): Promise<number> {
+  let restored = 0;
+  for (const [file, content] of backup) {
+    try {
+      await writeFile(join(sourceDir, file), content, 'utf8');
+      restored++;
+    } catch {
+      printWarning(`Could not restore ${file} — revert it manually`);
+    }
+  }
+  return restored;
+}
+
+function isGitRepo(dir: string): boolean {
+  try {
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir, stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Commit kept patches so each accepted fix is an auditable, revertable unit. */
+function gitCommitFixes(dir: string, files: string[], message: string): boolean {
+  try {
+    execFileSync('git', ['add', '--', ...files], { cwd: dir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', message], { cwd: dir, stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isImprovement(before: Snapshot, after: Snapshot): boolean {
   // Count metrics that improved (lower = better for all CWV)
   let improved = 0;
@@ -158,6 +214,13 @@ export async function runFix(args: FixArgs): Promise<void> {
 
   let previousSnapshot = baseline;
   let totalApplied = 0;
+  let totalKept    = 0;
+  // Findings already tried and reverted — without this, a reverted fix leaves
+  // metrics unchanged, the same top issue returns, and the loop spins on the
+  // identical patch until retries run out.
+  const attempted = new Set<string>();
+  const useGit    = isGitRepo(args.source);
+  if (useGit) dim('  Source is a git repository — accepted fixes will be committed.');
 
   // ── Loop ──────────────────────────────────────────────────────────────────
   for (let attempt = 1; attempt <= args.retries; attempt++) {
@@ -179,14 +242,19 @@ export async function runFix(args: FixArgs): Promise<void> {
       break;
     }
 
-    // Prioritise: critical first, then by confidence
+    // Prioritise: critical first, then by confidence — skipping findings
+    // whose fix was already tried and reverted.
     const sorted = [...allSuggestions].sort((a, b) => {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
       const sd = severityOrder[a.severity] - severityOrder[b.severity];
       return sd !== 0 ? sd : b.confidence - a.confidence;
     });
 
-    const top = sorted[0]!;
+    const top = sorted.find(s => !attempted.has(s.id));
+    if (!top) {
+      printWarning('All identified issues have been attempted without improvement. Stopping.');
+      break;
+    }
     printInfo(`  Top issue: [${top.severity}] ${top.title}`);
 
     // Step 2 — Inspect DOM
@@ -236,6 +304,7 @@ export async function runFix(args: FixArgs): Promise<void> {
     }
 
     printInfo(`  Applying ${patches.length} patch(es)…`);
+    const backup       = await backupFiles(args.source, patches.map(p => p.file));
     const patchResults = await applyPatches(args.source, patches);
 
     let appliedCount = 0;
@@ -261,25 +330,43 @@ export async function runFix(args: FixArgs): Promise<void> {
     printSnapshot('Before fix', previousSnapshot);
     printSnapshot('After fix ', afterSnapshot);
 
-    // Step 5 — Decide whether to continue
+    // Step 5 — Keep or revert
     if (isImprovement(previousSnapshot, afterSnapshot)) {
+      totalKept += appliedCount;
+      if (useGit) {
+        const files     = patchResults.filter(r => r.applied).map(r => r.file);
+        const committed = gitCommitFixes(
+          args.source,
+          files,
+          `perf: ${top.title}\n\nApplied by vitalsage fix (attempt ${attempt}).\n` +
+          `LCP ${formatMetric('LCP', previousSnapshot.lcp)} → ${formatMetric('LCP', afterSnapshot.lcp)}`,
+        );
+        if (committed) printSuccess('  Committed fix to git');
+      }
       printSuccess(`✅  Improvement confirmed on attempt ${attempt}!`);
       printSnapshot('Baseline ', baseline);
       printSnapshot('Final    ', afterSnapshot);
       break;
     }
 
+    // No improvement — roll back so a harmful patch never becomes the new
+    // baseline and later attempts aren't measured against a degraded page.
+    const restored = await restoreFiles(args.source, backup);
+    attempted.add(top.id);
+    printWarning(`No improvement — reverted ${restored} file(s).`);
+
     if (attempt < args.retries) {
-      printWarning(`No improvement detected on attempt ${attempt}. Retrying…`);
-      previousSnapshot = afterSnapshot;   // update context for next attempt
+      printInfo('Retrying with the next-ranked finding…');
+      // previousSnapshot deliberately stays at the pre-patch state: the
+      // revert restored it, so it remains the valid comparison base.
     } else {
       printWarning(`No measurable improvement after ${args.retries} attempt(s).`);
-      printInfo('Consider running with more --retries or inspecting the changes manually.');
+      printInfo('Consider running with more --retries or inspecting the findings manually.');
     }
   }
 
   // ── Final summary ─────────────────────────────────────────────────────────
   console.log('');
-  console.log(`${DIM}Total patches applied: ${totalApplied}${RESET}`);
+  console.log(`${DIM}Patches applied: ${totalApplied} · kept after validation: ${totalKept}${RESET}`);
   printSnapshot('Baseline', baseline);
 }
