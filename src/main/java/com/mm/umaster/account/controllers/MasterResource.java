@@ -2,7 +2,9 @@ package com.mm.umaster.account.controllers;
 
 
 import com.mm.umaster.account.error.ApiErrors;
+import com.mm.umaster.account.error.UserAlreadyExistsException;
 import com.mm.umaster.account.models.Master;
+import com.mm.umaster.account.models.RoleType;
 import com.mm.umaster.account.models.User;
 import com.mm.umaster.account.services.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +30,10 @@ public class MasterResource {
                         @AuthenticationPrincipal User principal) {
         if (errors.hasErrors()) {
             throw ApiErrors.buildErrors(errors);
+        }
+
+        if (principal.getAuthorities().contains(RoleType.ROLE_MASTER)) {
+            throw new UserAlreadyExistsException("The User is already master");
         }
 
         return userService.becomeUser(master, principal.getEmail());

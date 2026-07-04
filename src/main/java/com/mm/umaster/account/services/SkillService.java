@@ -1,5 +1,6 @@
 package com.mm.umaster.account.services;
 
+import com.mm.umaster.account.error.EntityNotFoundException;
 import com.mm.umaster.account.models.Master;
 import com.mm.umaster.account.models.Skill;
 import com.mm.umaster.account.models.User;
@@ -25,5 +26,17 @@ public class SkillService {
         Set<Skill> skills = master.getSkills();
         skills.add(skill);
         return master;
+    }
+
+    public Skill editSkill(Long skillId, Skill skill, long userId) {
+        Master master = masterRepository.findMasterByUser_Id(userId);
+
+        Skill newSkill = skillRepository.findById(skillId)
+                .orElseThrow(() -> new EntityNotFoundException("The skill"));
+        return skillRepository.save(skill);
+/*        Master master = masterRepository.findMasterByUser_Id(id);
+        Set<Skill> skills = master.getSkills();
+        skills.add(skill);
+        return master;*/
     }
 }

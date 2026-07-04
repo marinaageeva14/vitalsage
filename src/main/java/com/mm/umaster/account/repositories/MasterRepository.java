@@ -10,4 +10,5 @@ import java.util.Optional;
 public interface MasterRepository extends JpaRepository<Master, Long> {
 
     Master findMasterByUser_Id(Long id);
+  //  Master findMasterBySkil
 }

@@ -21,7 +21,7 @@ public class SkillResource {
     private SkillService skillService;
 
     @PostMapping()
-    Master addSkillToMaster(@Valid @RequestBody Skill skill,
+    public Master addSkillToMaster(@Valid @RequestBody Skill skill,
                             Errors errors,
                             @AuthenticationPrincipal User principal) {
         if (errors.hasErrors()) {
@@ -31,10 +31,16 @@ public class SkillResource {
     }
 
 /*    @PutMapping("/${id}")
-    void editMasterSkill(@Valid @RequestBody Skill skill) {
-
-    }
-
+    public Skill editMasterSkill(@PathVariable long id,
+                         @Valid @RequestBody Skill skill,
+                         Errors errors,
+                         @AuthenticationPrincipal User principal) {
+        if (errors.hasErrors()) {
+            throw ApiErrors.buildErrors(errors);
+        }
+        return skillService.editSkill(id, skill);
+    }*/
+/*
     @DeleteMapping("/${id}")
     void removeMasterSkill(@PathVariable Long id) {
 

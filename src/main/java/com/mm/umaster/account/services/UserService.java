@@ -4,6 +4,7 @@ import com.mm.umaster.account.error.UserAlreadyExistsException;
 import com.mm.umaster.account.models.*;
 import com.mm.umaster.account.repositories.AddressRepository;
 import com.mm.umaster.account.repositories.MasterRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -15,19 +16,13 @@ import com.mm.umaster.account.repositories.UserRepository;
 import java.util.*;
 
 @Service
+@RequiredArgsConstructor
 public class UserService implements UserDetailsService {
 
-    @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private MasterRepository masterRepository;
-
-    @Autowired
-    private AddressRepository addressRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
+    private final UserRepository userRepository;
+    private final MasterRepository masterRepository;
+    private final AddressRepository addressRepository;
+    private final PasswordEncoder passwordEncoder;
 
     public User createNewUserAccount(User user) {
         if (this.emailExists(user.getEmail())) {
@@ -57,14 +52,14 @@ public class UserService implements UserDetailsService {
     }
 
     public User changeRole(final RoleType roleType,
-                                final String email) throws UsernameNotFoundException {
+                           final String email) throws UsernameNotFoundException {
         User user = userRepository.findByEmail(email);
 
         if (user == null) {
             throw new UsernameNotFoundException("User " + email + " was not found");
         }
 
-    //    user.setRoles(Collections.singleton(roleType));
+        //    user.setRoles(Collections.singleton(roleType));
         return user;
     }
 

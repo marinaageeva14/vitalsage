@@ -18,7 +18,7 @@ public class Skill {
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
 
-
+z
     @NotNull
     private String name;
     private String description;
