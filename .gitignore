@@ -10,3 +10,10 @@ coverage/
 # Generated performance reports — never commit
 reports/
 vitalsage-fix-report-*.json
+
+# Next.js build output
+.next/
+
+# SQLite transient sidecar files (the committed .db is a demo seed)
+*.db-shm
+*.db-wal
