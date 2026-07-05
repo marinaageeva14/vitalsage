@@ -10,6 +10,12 @@ coverage/
 # Local Claude Code config
 .claude/
 
+# Playwright test runner output
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # Generated performance reports — never commit
 reports/
 vitalsage-fix-report-*.json
