@@ -45,9 +45,9 @@ pnpm install
 pnpm build
 ```
 
-### 2. Install the browser engine
+### 2. Download the browser binary
 
-The `simulate`, `trace`, `capture`, and `fix` commands drive a real Chromium through Playwright:
+`pnpm install` above already added the Playwright **package** (it's a dependency of the CLI and simulator). This step downloads the actual Chromium **browser** that the `simulate`, `trace`, `capture`, and `fix` commands drive:
 
 ```bash
 pnpm exec playwright install chromium
@@ -188,7 +188,9 @@ pnpm install
 # 2. Build all packages
 pnpm build
 
-# 3. Install the Playwright browser (required for the CLI: simulate / trace / capture / fix)
+# 3. Download the Chromium browser Playwright drives.
+#    The Playwright package itself was installed by `pnpm install` above;
+#    this only fetches the browser binary. Required for the CLI (simulate / trace / capture / fix).
 pnpm exec playwright install chromium
 
 # 4. Start the collection server
