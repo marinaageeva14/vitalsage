@@ -6,3 +6,7 @@ coverage/
 *.local
 .env
 .vitalsage-trace-tmp/
+
+# Generated performance reports — never commit
+reports/
+vitalsage-fix-report-*.json
