@@ -1,6 +1,6 @@
-import { chromium, type Browser, type CDPSession } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type CDPSession } from 'playwright';
 import type { LoadPhaseSnapshot } from './tracer.js';
-import { mkdir, writeFile }       from 'node:fs/promises';
+import { mkdir, writeFile, readdir } from 'node:fs/promises';
 import { join }                   from 'node:path';
 import type { SimulatorConfig, SessionReport, NetworkProfile, ViewportProfile } from '@vitalsage/types';
 import { INJECTOR_SCRIPT }        from './injector.js';
@@ -12,10 +12,26 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+/** A profile dir is "fresh" if it doesn't exist yet or is empty. */
+async function isProfileEmpty(dir: string): Promise<boolean> {
+  try {
+    return (await readdir(dir)).length === 0;
+  } catch {
+    return true;   // doesn't exist yet
+  }
+}
+
 interface RunSpec {
   network:  NetworkProfile;
   viewport: ViewportProfile;
   route:    string;
+}
+
+/** A provisioned page for one run, plus how to release it afterward. */
+interface RunEnv {
+  context: BrowserContext;
+  page:    Page;
+  release: () => Promise<void>;
 }
 
 function buildRunPlan(config: SimulatorConfig): RunSpec[] {
@@ -38,12 +54,59 @@ export class PlaywrightSimulator {
   async simulate(config: SimulatorConfig): Promise<SessionReport[]> {
     await mkdir(config.outputDir, { recursive: true });
 
-    const browser     = await chromium.launch({ headless: true });
-    const concurrency = config.concurrency ?? 3;
+    const usePersistent = !!config.userDataDir;
+    // A persistent profile is a single browser session — running pages in
+    // parallel would share/clobber cookies. Serialize when reusing a profile.
+    const concurrency = usePersistent ? 1 : (config.concurrency ?? 3);
+
+    const channelOpt = config.browserChannel ? { channel: config.browserChannel } : {};
+
+    let browser:       Browser | undefined;
+    let persistentCtx: BrowserContext | undefined;
+
+    if (usePersistent) {
+      const fresh  = await isProfileEmpty(config.userDataDir!);
+      // Auto-headed the first time so the user can see the window and log in.
+      const headed = config.headed || fresh;
+      persistentCtx = await chromium.launchPersistentContext(config.userDataDir!, {
+        headless: !headed,
+        ...channelOpt,
+      });
+
+      // Fresh profile → open the target URL and pause for sign-in before
+      // measuring, so authenticated routes are reachable on the runs that follow.
+      if (fresh && config.onProfileInit) {
+        const setupPage = await persistentCtx.newPage();
+        await setupPage.goto(config.url, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+        await config.onProfileInit();
+        await setupPage.close().catch(() => {});
+      }
+    } else {
+      browser = await chromium.launch({ headless: !config.headed, ...channelOpt });
+    }
+
+    // Per-run page provisioning. Persistent mode reuses the one authenticated
+    // context (new page each run); default mode gets a fresh isolated context.
+    const provision = async (run: RunSpec): Promise<RunEnv> => {
+      const vp = VIEWPORT_PROFILES[run.viewport];
+      if (persistentCtx) {
+        const page = await persistentCtx.newPage();
+        await page.setViewportSize({ width: vp.width, height: vp.height }).catch(() => {});
+        return { context: persistentCtx, page, release: async () => { await page.close().catch(() => {}); } };
+      }
+      const context = await browser!.newContext({
+        viewport:          { width: vp.width, height: vp.height },
+        deviceScaleFactor: vp.deviceScaleFactor,
+        isMobile:          vp.isMobile,
+        hasTouch:          vp.hasTouch,
+      });
+      const page = await context.newPage();
+      return { context, page, release: async () => { await context.close().catch(() => {}); } };
+    };
+
     const sessions:   SessionReport[] = [];
     const errors:     Error[] = [];
     const plan        = buildRunPlan(config);
-
     const delay = config.delayBetweenRuns ?? 0;
 
     for (let i = 0; i < plan.length; i += concurrency) {
@@ -53,7 +116,10 @@ export class PlaywrightSimulator {
 
       const chunk   = plan.slice(i, i + concurrency);
       const results = await Promise.allSettled(
-        chunk.map(run => this.executeRun(browser, config, run))
+        chunk.map(async run => {
+          const env = await provision(run);
+          return this.executeRun(env, config, run);
+        })
       );
 
       results.forEach((r, idx) => {
@@ -67,7 +133,8 @@ export class PlaywrightSimulator {
       console.log(`[VitalSage Simulator] ${Math.min(i + concurrency, plan.length)}/${plan.length} runs complete`);
     }
 
-    await browser.close();
+    if (persistentCtx) await persistentCtx.close().catch(() => {});
+    else               await browser!.close().catch(() => {});
 
     if (errors.length > 0) {
       console.warn(`[VitalSage Simulator] ${errors.length} runs failed:`, errors.map(e => e.message));
@@ -78,19 +145,13 @@ export class PlaywrightSimulator {
   }
 
   private async executeRun(
-    browser: Browser,
+    env:     RunEnv,
     config:  SimulatorConfig,
     run:     RunSpec,
   ): Promise<SessionReport | null> {
     const vp      = VIEWPORT_PROFILES[run.viewport];
-    const context = await browser.newContext({
-      viewport:          { width: vp.width, height: vp.height },
-      deviceScaleFactor: vp.deviceScaleFactor,
-      isMobile:          vp.isMobile,
-      hasTouch:          vp.hasTouch,
-    });
+    const { context, page } = env;
 
-    const page = await context.newPage();
     // Single page-level CDP session for network throttling, Performance.getMetrics,
     // and the V8 Profiler domain.
     //
@@ -226,7 +287,7 @@ export class PlaywrightSimulator {
         await mainCdp.send('Profiler.stop').catch(() => {});
       }
       await mainCdp?.detach().catch(() => {});
-      await context.close().catch(() => {});
+      await env.release();
     }
   }
 

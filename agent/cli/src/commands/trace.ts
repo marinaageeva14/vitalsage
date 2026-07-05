@@ -2,6 +2,7 @@ import { writeFile }  from 'node:fs/promises';
 import type { TraceMetrics, NetworkProfile, ViewportProfile, SessionReport } from '@vitalsage/types';
 import type { Suggestion } from '@vitalsage/types';
 import { printSuccess, printError, printInfo } from '../output/terminal.js';
+import { browserConfig, type BrowserOpts } from '../utils/browser.js';
 
 const RESET  = '\x1b[0m';
 const BOLD   = '\x1b[1m';
@@ -253,7 +254,7 @@ function filterConsistentFindings(
     });
 }
 
-export interface TraceArgs {
+export interface TraceArgs extends BrowserOpts {
   url:          string;
   runs:         number;
   network:      string;
@@ -299,6 +300,7 @@ export async function runTrace(args: TraceArgs): Promise<void> {
       waitAfterLoad:      3000,
       delayBetweenRuns:   args.delay ?? 2000,
       interactAfterLoad:  false, // no click → LCP observer stays live for all candidates
+      ...browserConfig(args),
     });
   } finally {
     console.log = origLog;

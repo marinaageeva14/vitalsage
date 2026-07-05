@@ -1,8 +1,9 @@
 import type { SimulatorConfig, NetworkProfile, ViewportProfile } from '@vitalsage/types';
 import { printSuccess, printError, printInfo } from '../output/terminal.js';
 import { ProgressBar } from '../output/progress.js';
+import { browserConfig, type BrowserOpts } from '../utils/browser.js';
 
-export interface SimulateArgs {
+export interface SimulateArgs extends BrowserOpts {
   url:         string;
   runs:        number;
   routes?:     string[];
@@ -23,6 +24,7 @@ export async function runSimulate(args: SimulateArgs): Promise<void> {
     ...(args.routes   ? { routes:   args.routes }                              : {}),
     ...(args.networks ? { networks: args.networks as NetworkProfile[] }        : {}),
     ...(args.viewports ? { viewports: args.viewports as ViewportProfile[] }    : {}),
+    ...browserConfig(args),
   };
 
   printInfo(`Simulating ${args.runs} runs against ${args.url}`);

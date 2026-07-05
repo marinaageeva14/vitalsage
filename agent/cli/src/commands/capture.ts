@@ -22,6 +22,7 @@ import type {
 import type { Suggestion } from '@vitalsage/types';
 import { AnalysisEngine, interactionsToSessions } from 'vitalsage-analysis';
 import { printSuccess, printError, printInfo } from '../output/terminal.js';
+import { browserConfig, type BrowserOpts } from '../utils/browser.js';
 
 // ── ANSI helpers (duplicated from trace.ts to keep commands self-contained) ──
 
@@ -272,7 +273,7 @@ function averageTraceMetrics(sessions: SessionReport[]): TraceMetrics | undefine
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export interface CaptureArgs {
+export interface CaptureArgs extends BrowserOpts {
   url:        string;
   server?:    string;
   app?:       string;
@@ -346,6 +347,7 @@ export async function runCapture(args: CaptureArgs): Promise<void> {
       viewports:        [(args.viewport ?? 'desktop') as ViewportProfile],
       waitAfterLoad:    3000,
       delayBetweenRuns: 1500,
+      ...browserConfig(args),
     });
   } finally {
     console.log = origLog;

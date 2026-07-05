@@ -23,11 +23,13 @@ import type { AIConfig, SessionReport }    from '@vitalsage/types';
 import { inspectDom }           from '../utils/dom.js';
 import { readSourceFiles, applyPatches } from '../utils/source.js';
 import { generateFixes }        from '../ai/fixer.js';
+import { browserConfig, type BrowserOpts } from '../utils/browser.js';
+import type { SimulatorConfig } from '@vitalsage/types';
 import {
   printSuccess, printError, printWarning, printInfo,
 } from '../output/terminal.js';
 
-export interface FixArgs {
+export interface FixArgs extends BrowserOpts {
   url:        string;
   source:     string;         // path to source directory
   retries:    number;         // REQUIRED — no default
@@ -90,6 +92,7 @@ async function measure(
   runs:     number,
   network:  '4g' | '3g',
   viewport: 'desktop' | 'mobile',
+  browserCfg: Partial<SimulatorConfig> = {},
 ): Promise<Snapshot> {
   const sim      = new PlaywrightSimulator();
   const sessions = await sim.simulate({
@@ -99,6 +102,7 @@ async function measure(
     viewports: [viewport],
     captureTrace: false,
     outputDir: join(tmpdir(), `vitalsage-fix-${Date.now()}`),
+    ...browserCfg,
   });
   return {
     sessions,
@@ -260,9 +264,13 @@ export async function runFix(args: FixArgs): Promise<void> {
 
   const engine = new AnalysisEngine({ ai: aiConfig });
 
+  // Browser options (system channel / persistent auth profile / headed) are
+  // shared across every measurement pass in the loop.
+  const browserCfg = browserConfig(args);
+
   // ── Step 0: Baseline measurement ──────────────────────────────────────────
   banner(`⏱  Capturing baseline — ${runs} run(s) on ${network} / ${viewport}`);
-  const baseline = await measure(args.url, runs, network, viewport);
+  const baseline = await measure(args.url, runs, network, viewport, browserCfg);
   printSuccess('Baseline captured');
   printSnapshot('Baseline', baseline);
 
@@ -385,7 +393,7 @@ export async function runFix(args: FixArgs): Promise<void> {
       printWarning('  Served page does not reflect the patch yet (rebuild lag?) — measuring anyway.');
     }
     printInfo(`Step 4: Re-measuring after fix (${runs} run(s))…`);
-    const afterSnapshot = await measure(args.url, runs, network, viewport);
+    const afterSnapshot = await measure(args.url, runs, network, viewport, browserCfg);
 
     printSnapshot('Before fix', previousSnapshot);
     printSnapshot('After fix ', afterSnapshot);

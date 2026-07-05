@@ -115,6 +115,35 @@ New to the project? The [Quick Start](#quick-start) and the per-package sections
 
 ---
 
+## Old machines & pages behind login
+
+The `simulate` / `trace` / `capture` / `fix` commands drive a browser to capture the CDP flame-graph trace — the core of the analysis. By default that's Playwright's **bundled Chromium**, which needs a fairly recent OS. On older machines, or to trace pages that require **authentication**, point VitalSage at the user's **own local Chrome** instead. Tracing is unaffected — the trace comes from the Chrome DevTools Protocol, which every Chromium build speaks.
+
+Three flags (each also an env var) cover it, on every browser-driving command:
+
+| Flag | Env var | What it does |
+|---|---|---|
+| `--browser-channel chrome` | `VITALSAGE_BROWSER_CHANNEL` | Drive the system-installed Chrome/Edge instead of bundled Chromium — runs on OSes too old for the bundled browser. |
+| `--user-data-dir <path>` | `VITALSAGE_USER_DATA_DIR` | Reuse a persistent Chrome profile, so cookies/logins persist across runs. |
+| `--headed` | `VITALSAGE_HEADED=1` | Show the browser window (default: headless). |
+
+### Trace a page behind login
+
+```bash
+vitalsage trace \
+  --url https://app.example.com/dashboard \
+  --browser-channel chrome \
+  --user-data-dir ~/.vitalsage-chrome \
+  --output report.html
+```
+
+- **First run:** the profile is empty, so the browser opens **visibly** on the page. Log in, then press **Enter** in the terminal — measurement begins on the authenticated page.
+- **Every run after:** the profile is already signed in, so it runs **headless** automatically. No remote browser, no credentials leave the machine — the session lives in the local profile.
+
+> A persistent profile is a single session, so these runs are serialized (concurrency 1). Use a dedicated profile dir (e.g. `~/.vitalsage-chrome`), not your everyday Chrome profile.
+
+---
+
 ## Table of Contents
 
 **New here? Jump to [Get Started](#get-started).**

@@ -68,4 +68,28 @@ export interface SimulatorConfig {
   outputDir:          string;
   concurrency?:       number;
   delayBetweenRuns?:  number;  // ms to wait between batch chunks
+
+  /**
+   * Drive a system-installed browser by channel (e.g. 'chrome', 'msedge')
+   * instead of Playwright's bundled Chromium. Lets VitalSage run on machines
+   * whose OS is too old for the bundled browser, as long as Chrome/Edge is
+   * installed. CDP tracing is unaffected — every Chromium build speaks it.
+   */
+  browserChannel?: string;
+  /**
+   * Persistent user-data directory. When set, the simulator reuses one browser
+   * profile across runs so cookies and logins persist — this is what lets you
+   * trace pages behind authentication (log in once, trace the logged-in routes
+   * thereafter). Forces concurrency to 1 (a profile is a single session).
+   */
+  userDataDir?: string;
+  /** Run with a visible browser window (default: headless). */
+  headed?: boolean;
+  /**
+   * Called once when a fresh (empty) `userDataDir` profile is opened on the
+   * target URL, so the user can sign in before measurement begins. Resolves
+   * when setup is complete. The CLI wires this to an interactive "press Enter"
+   * prompt; programmatic callers can automate login here instead.
+   */
+  onProfileInit?: () => Promise<void>;
 }

@@ -54,6 +54,25 @@ function getStringArray(args: Map<string, unknown>, key: string): string[] | und
   return undefined;
 }
 
+/**
+ * Shared browser options for the commands that drive a browser (simulate,
+ * trace, capture, fix). Each flag also falls back to an env var so it can be
+ * set once for a whole session.
+ */
+function getBrowserOpts(args: Map<string, unknown>): {
+  browserChannel?: string; userDataDir?: string; headed?: boolean;
+} {
+  const browserChannel = getString(args, 'browserChannel') ?? process.env['VITALSAGE_BROWSER_CHANNEL'];
+  const userDataDir    = getString(args, 'userDataDir')    ?? process.env['VITALSAGE_USER_DATA_DIR'];
+  const headed = args.get('headed') === true || args.get('headed') === 'true'
+    || process.env['VITALSAGE_HEADED'] === '1';
+  return {
+    ...(browserChannel ? { browserChannel } : {}),
+    ...(userDataDir    ? { userDataDir }    : {}),
+    ...(headed         ? { headed: true }   : {}),
+  };
+}
+
 const USAGE = `
 VitalSage — Web Performance Analysis Tool
 
@@ -146,6 +165,25 @@ Options (fix):
   --network      Network profile: 4g | 3g (default: 4g)
   --viewport     Viewport: desktop | mobile (default: desktop)
 
+Browser options (simulate, trace, capture, fix):
+  --browser-channel <name>  Drive a system-installed browser (chrome | msedge)
+                            instead of bundled Chromium — for machines whose OS
+                            is too old for the bundled browser.
+                            Env: VITALSAGE_BROWSER_CHANNEL
+  --user-data-dir <path>    Reuse a persistent Chrome profile across runs. Lets
+                            you trace pages behind login: a fresh profile opens
+                            headed so you can sign in once, then later runs reuse
+                            the session. Env: VITALSAGE_USER_DATA_DIR
+  --headed                  Show the browser window (default: headless).
+                            Env: VITALSAGE_HEADED=1
+
+Example — trace an authenticated page with your local Chrome:
+  vitalsage trace \\
+    --url https://app.example.com/dashboard \\
+    --browser-channel chrome \\
+    --user-data-dir ~/.vitalsage-chrome \\
+    --output report.html
+
 Example:
   vitalsage fix \\
     --url http://localhost:5173 \\
@@ -180,6 +218,7 @@ async function main(): Promise<void> {
       ...(routes    ? { routes }    : {}),
       ...(networks  ? { networks }  : {}),
       ...(viewports ? { viewports } : {}),
+      ...getBrowserOpts(args),
     });
     return;
   }
@@ -239,6 +278,7 @@ async function main(): Promise<void> {
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),
       ...(output     ? { output }     : {}),
+      ...getBrowserOpts(args),
     });
     return;
   }
@@ -271,6 +311,7 @@ async function main(): Promise<void> {
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),
       ...(output     ? { output }     : {}),
+      ...getBrowserOpts(args),
     });
     return;
   }
@@ -312,6 +353,7 @@ async function main(): Promise<void> {
       ...(network  ? { network }  : {}),
       ...(viewport ? { viewport } : {}),
       runs: getNumber(args, 'runs', 5),
+      ...getBrowserOpts(args),
     });
     return;
   }
