@@ -188,18 +188,21 @@ pnpm install
 # 2. Build all packages
 pnpm build
 
-# 3. Start the collection server
+# 3. Install the Playwright browser (required for the CLI: simulate / trace / capture / fix)
+pnpm exec playwright install chromium
+
+# 4. Start the collection server
 cd platform/examples/server && pnpm dev
 # → http://localhost:3001
 
-# 4. Start an example app (in a new terminal)
+# 5. Start an example app (in a new terminal)
 cd platform/examples/vanilla && pnpm dev
 # → http://localhost:5173
 
-# 5. Browse the app — interactions are posted to the server automatically
+# 6. Browse the app — interactions are posted to the server automatically
 #    Open browser console to see VitalSage logging metrics in real time
 
-# 6. Run analysis over collected data
+# 7. Run analysis over collected data
 curl "http://localhost:3001/api/audit?app=vanilla&minSamples=1"
 ```
 
