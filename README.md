@@ -127,6 +127,8 @@ Three flags (each also an env var) cover it, on every browser-driving command:
 | `--user-data-dir <path>` | `VITALSAGE_USER_DATA_DIR` | Reuse a persistent Chrome profile, so cookies/logins persist across runs. |
 | `--headed` | `VITALSAGE_HEADED=1` | Show the browser window (default: headless). |
 
+> **`--browser-channel` and `--user-data-dir` are independent.** To run on your **actual local Chrome** you must pass `--browser-channel chrome`. `--user-data-dir` *alone* still uses the **bundled** Chromium — it just gives it a persistent profile. For local Chrome + login, use **both**.
+
 ### Trace a page behind login
 
 ```bash
@@ -141,6 +143,22 @@ vitalsage trace \
 - **Every run after:** the profile is already signed in, so it runs **headless** automatically. No remote browser, no credentials leave the machine — the session lives in the local profile.
 
 > A persistent profile is a single session, so these runs are serialized (concurrency 1). Use a dedicated profile dir (e.g. `~/.vitalsage-chrome`), not your everyday Chrome profile.
+
+### Confirm which browser actually ran
+
+Every run prints a `[VitalSage] Browser:` line at launch stating the engine, version, mode, and profile — so you can verify you're on your local Chrome, not the bundled Chromium:
+
+```
+[VitalSage] Browser: system browser 'chrome' v131.0.6778.86 · headed · profile: /Users/you/.vitalsage-chrome
+[VitalSage] Browser: bundled Chromium v141.0.7340.0 · headless · ephemeral profile
+```
+
+Three ways to be sure:
+1. **The launch line** — `system browser 'chrome'` vs `bundled Chromium`. This is the definitive check.
+2. **The version** — a `system browser` reports *your installed Chrome's* version (compare with `chrome://version`, or `google-chrome --version`). Bundled Chromium reports the version tied to the installed Playwright release.
+3. **Run `--headed` and look** — your system Chrome shows Chrome branding (and your profile); bundled Chromium is the plain, unbranded "Chromium" build.
+
+If the line says `bundled Chromium` but you expected local Chrome, you likely passed `--user-data-dir` without `--browser-channel chrome` — add the channel flag.
 
 ---
 

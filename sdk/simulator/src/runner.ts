@@ -63,13 +63,14 @@ export class PlaywrightSimulator {
 
     let browser:       Browser | undefined;
     let persistentCtx: BrowserContext | undefined;
+    let effectiveHeaded = !!config.headed;
 
     if (usePersistent) {
       const fresh  = await isProfileEmpty(config.userDataDir!);
       // Auto-headed the first time so the user can see the window and log in.
-      const headed = config.headed || fresh;
+      effectiveHeaded = config.headed || fresh;
       persistentCtx = await chromium.launchPersistentContext(config.userDataDir!, {
-        headless: !headed,
+        headless: !effectiveHeaded,
         ...channelOpt,
       });
 
@@ -84,6 +85,19 @@ export class PlaywrightSimulator {
     } else {
       browser = await chromium.launch({ headless: !config.headed, ...channelOpt });
     }
+
+    // Announce which browser actually ran so users can confirm they're on the
+    // local/system browser vs the bundled Chromium. Uses the [VitalSage] prefix
+    // (not [VitalSage Simulator]) so it survives the trace/capture log filters.
+    const activeBrowser = persistentCtx?.browser() ?? browser;
+    const engineLabel   = config.browserChannel
+      ? `system browser '${config.browserChannel}'`
+      : 'bundled Chromium';
+    console.log(
+      `[VitalSage] Browser: ${engineLabel} v${activeBrowser?.version() ?? 'unknown'}` +
+      ` · ${effectiveHeaded ? 'headed' : 'headless'}` +
+      (config.userDataDir ? ` · profile: ${config.userDataDir}` : ' · ephemeral profile'),
+    );
 
     // Per-run page provisioning. Persistent mode reuses the one authenticated
     // context (new page each run); default mode gets a fresh isolated context.
