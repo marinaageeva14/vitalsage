@@ -86,10 +86,17 @@ export interface SimulatorConfig {
   /** Run with a visible browser window (default: headless). */
   headed?: boolean;
   /**
-   * Called once when a fresh (empty) `userDataDir` profile is opened on the
-   * target URL, so the user can sign in before measurement begins. Resolves
-   * when setup is complete. The CLI wires this to an interactive "press Enter"
-   * prompt; programmatic callers can automate login here instead.
+   * Force the login step even when the profile already exists. Chrome
+   * populates a user-data dir on first launch regardless of whether the user
+   * signed in, so "empty dir" alone can't tell us auth is set up — this lets
+   * the caller explicitly (re)authenticate. Implies headed.
+   */
+  forceLogin?: boolean;
+  /**
+   * Called before measurement when a `userDataDir` profile needs sign-in —
+   * either a fresh profile or `forceLogin`. The browser is already open on the
+   * target URL; resolve when login is complete. The CLI wires this to an
+   * interactive "press Enter" prompt; programmatic callers can automate login.
    */
   onProfileInit?: () => Promise<void>;
 }

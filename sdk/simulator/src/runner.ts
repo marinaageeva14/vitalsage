@@ -66,20 +66,24 @@ export class PlaywrightSimulator {
     let effectiveHeaded = !!config.headed;
 
     if (usePersistent) {
-      const fresh  = await isProfileEmpty(config.userDataDir!);
-      // Auto-headed the first time so the user can see the window and log in.
-      effectiveHeaded = config.headed || fresh;
+      const fresh     = await isProfileEmpty(config.userDataDir!);
+      // Sign-in is needed on a brand-new profile, or whenever the caller asks
+      // for it explicitly (--login). Chrome fills the dir on first launch even
+      // without a login, so "fresh" alone is not a reliable auth signal.
+      const needsLogin = (fresh || config.forceLogin === true) && !!config.onProfileInit;
+      // Force a visible window whenever we're going to ask the user to log in.
+      effectiveHeaded = config.headed || needsLogin;
       persistentCtx = await chromium.launchPersistentContext(config.userDataDir!, {
         headless: !effectiveHeaded,
         ...channelOpt,
       });
 
-      // Fresh profile → open the target URL and pause for sign-in before
-      // measuring, so authenticated routes are reachable on the runs that follow.
-      if (fresh && config.onProfileInit) {
+      // Open the target URL and pause for sign-in before measuring, so
+      // authenticated routes are reachable on the runs that follow.
+      if (needsLogin) {
         const setupPage = await persistentCtx.newPage();
         await setupPage.goto(config.url, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
-        await config.onProfileInit();
+        await config.onProfileInit!();
         await setupPage.close().catch(() => {});
       }
     } else {

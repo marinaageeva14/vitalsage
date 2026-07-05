@@ -60,16 +60,27 @@ function getStringArray(args: Map<string, unknown>, key: string): string[] | und
  * set once for a whole session.
  */
 function getBrowserOpts(args: Map<string, unknown>): {
-  browserChannel?: string; userDataDir?: string; headed?: boolean;
+  browserChannel?: string; userDataDir?: string; headed?: boolean; login?: boolean;
 } {
   const browserChannel = getString(args, 'browserChannel') ?? process.env['VITALSAGE_BROWSER_CHANNEL'];
   const userDataDir    = getString(args, 'userDataDir')    ?? process.env['VITALSAGE_USER_DATA_DIR'];
   const headed = args.get('headed') === true || args.get('headed') === 'true'
     || process.env['VITALSAGE_HEADED'] === '1';
+  const login = args.get('login') === true || args.get('login') === 'true'
+    || process.env['VITALSAGE_LOGIN'] === '1';
+
+  // Signing in only makes sense with a persistent profile to save it into.
+  if (login && !userDataDir) {
+    printError('--login requires --user-data-dir <path> to persist the session.');
+    printError('Example: --browser-channel chrome --user-data-dir ~/.vitalsage-chrome --login');
+    process.exit(1);
+  }
+
   return {
     ...(browserChannel ? { browserChannel } : {}),
     ...(userDataDir    ? { userDataDir }    : {}),
     ...(headed         ? { headed: true }   : {}),
+    ...(login          ? { login: true }    : {}),
   };
 }
 
@@ -170,14 +181,26 @@ Browser options (simulate, trace, capture, fix):
                             instead of bundled Chromium — for machines whose OS
                             is too old for the bundled browser.
                             Env: VITALSAGE_BROWSER_CHANNEL
-  --user-data-dir <path>    Reuse a persistent Chrome profile across runs. Lets
-                            you trace pages behind login: a fresh profile opens
-                            headed so you can sign in once, then later runs reuse
-                            the session. Env: VITALSAGE_USER_DATA_DIR
+  --user-data-dir <path>    Reuse a persistent Chrome profile across runs, so
+                            cookies/logins persist. Env: VITALSAGE_USER_DATA_DIR
+  --login                   Open the browser (headed) and pause for sign-in
+                            before measuring, then persist the session in the
+                            profile. Use this the first time (and any time you
+                            need to re-authenticate). Requires --user-data-dir.
+                            Env: VITALSAGE_LOGIN=1
   --headed                  Show the browser window (default: headless).
                             Env: VITALSAGE_HEADED=1
 
 Example — trace an authenticated page with your local Chrome:
+  # 1. Sign in once (opens Chrome, log in, press Enter):
+  vitalsage trace \\
+    --url https://app.example.com/dashboard \\
+    --browser-channel chrome \\
+    --user-data-dir ~/.vitalsage-chrome \\
+    --login \\
+    --output report.html
+
+  # 2. Later runs reuse the session automatically (headless):
   vitalsage trace \\
     --url https://app.example.com/dashboard \\
     --browser-channel chrome \\
