@@ -27,7 +27,97 @@ agent/mcp  (vitalsage-mcp)
 
 ---
 
+## Get Started
+
+Up and running in a few minutes. Pick a path once the setup steps are done.
+
+### Prerequisites
+
+- **Node.js ≥ 18** (developed on 22)
+- **pnpm ≥ 9** — install with `npm install -g pnpm`
+
+### 1. Install & build
+
+```bash
+git clone https://github.com/marinaageeva14/vitalsage.git
+cd vitalsage
+pnpm install
+pnpm build
+```
+
+### 2. Install the browser engine
+
+The `simulate`, `trace`, `capture`, and `fix` commands drive a real Chromium through Playwright:
+
+```bash
+pnpm exec playwright install chromium
+```
+
+That's the whole setup. Now choose a path.
+
+### Path A — Audit any live URL (fastest, zero config)
+
+Measure Core Web Vitals plus a main-thread trace for any page and save an HTML report:
+
+```bash
+node agent/cli/dist/index.cjs trace \
+  --url https://example.com \
+  --runs 3 \
+  --output report.html
+```
+
+Open `report.html` in a browser. No server and no API key required — the rule-based agents produce findings on their own. Add AI-generated suggestions with `--ai-provider` and `--ai-key` (see below).
+
+> **Tip:** link the CLI globally so you can just type `vitalsage`:
+> ```bash
+> cd agent/cli && pnpm link --global && cd -
+> vitalsage trace --url https://example.com --output report.html
+> ```
+
+### Path B — Run the full demo stack (SDK → server → app)
+
+See the browser SDK collecting real-user data end to end. Use two terminals:
+
+```bash
+# Terminal 1 — collection server → http://localhost:3001
+cd platform/examples/server && pnpm dev
+
+# Terminal 2 — example app → http://localhost:5173
+cd platform/examples/vanilla && pnpm dev
+```
+
+Browse http://localhost:5173 (open the console to watch metrics stream), then analyze what was collected:
+
+```bash
+curl "http://localhost:3001/api/audit?app=vanilla&minSamples=1"
+```
+
+### Enable AI-powered suggestions (optional)
+
+VitalSage works without an LLM, but a provider turns raw metrics into specific, prioritized fixes. Supported providers: `anthropic`, `openai`, `gemini`.
+
+```bash
+# With the CLI
+node agent/cli/dist/index.cjs trace \
+  --url https://example.com \
+  --ai-provider anthropic \
+  --ai-key "$ANTHROPIC_API_KEY" \
+  --output report.html
+
+# With the example server (enables AI enhancement on /api/audit)
+export ANTHROPIC_API_KEY=sk-ant-...
+cd platform/examples/server && pnpm dev
+```
+
+Any OpenAI-compatible endpoint also works via `--ai-provider openai` with `OPENAI_BASE_URL` set (e.g. NVIDIA NIM or a local model server).
+
+New to the project? The [Quick Start](#quick-start) and the per-package sections below go deeper.
+
+---
+
 ## Table of Contents
+
+**New here? Jump to [Get Started](#get-started).**
 
 1. [Monorepo Structure](#monorepo-structure)
 2. [Quick Start](#quick-start)
