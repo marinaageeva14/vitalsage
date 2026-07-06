@@ -19,6 +19,10 @@ blob-report/
 # Generated performance reports — never commit
 reports/
 vitalsage-fix-report-*.json
+report.html
+report-*.html
+capture-*.html
+*-audit-*.html
 
 # Next.js build output
 .next/
