@@ -21,6 +21,44 @@ async function isProfileEmpty(dir: string): Promise<boolean> {
   }
 }
 
+/** Playwright's "bundled browser not downloaded" error. */
+function isMissingBrowserError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /Executable doesn't exist|playwright install/i.test(msg);
+}
+
+/**
+ * Launch with graceful fallback: when no explicit channel is configured and
+ * the bundled Chromium was never downloaded (`playwright install chromium`),
+ * fall back to the system Chrome, then Edge. This lets users audit with the
+ * browser they already have — no browser download required, which matters on
+ * older machines where the bundled build may not even run.
+ */
+async function launchWithFallback<T>(
+  explicitChannel: string | undefined,
+  launch: (channel?: string) => Promise<T>,
+): Promise<{ result: T; channelUsed?: string }> {
+  if (explicitChannel) {
+    return { result: await launch(explicitChannel), channelUsed: explicitChannel };
+  }
+  try {
+    return { result: await launch() };
+  } catch (err) {
+    if (!isMissingBrowserError(err)) throw err;
+    for (const channel of ['chrome', 'msedge']) {
+      try {
+        const result = await launch(channel);
+        console.log(
+          `[VitalSage] Bundled Chromium is not installed — using the system browser '${channel}' instead. ` +
+          `(To use the bundled browser: pnpm exec playwright install chromium)`,
+        );
+        return { result, channelUsed: channel };
+      } catch { /* try the next channel */ }
+    }
+    throw err;   // re-throw the original, actionable Playwright error
+  }
+}
+
 interface RunSpec {
   network:  NetworkProfile;
   viewport: ViewportProfile;
@@ -59,10 +97,9 @@ export class PlaywrightSimulator {
     // parallel would share/clobber cookies. Serialize when reusing a profile.
     const concurrency = usePersistent ? 1 : (config.concurrency ?? 3);
 
-    const channelOpt = config.browserChannel ? { channel: config.browserChannel } : {};
-
     let browser:       Browser | undefined;
     let persistentCtx: BrowserContext | undefined;
+    let channelUsed:   string | undefined;
     let effectiveHeaded = !!config.headed;
 
     if (usePersistent) {
@@ -73,10 +110,13 @@ export class PlaywrightSimulator {
       const needsLogin = (fresh || config.forceLogin === true) && !!config.onProfileInit;
       // Force a visible window whenever we're going to ask the user to log in.
       effectiveHeaded = config.headed || needsLogin;
-      persistentCtx = await chromium.launchPersistentContext(config.userDataDir!, {
-        headless: !effectiveHeaded,
-        ...channelOpt,
-      });
+      ({ result: persistentCtx, channelUsed } = await launchWithFallback(
+        config.browserChannel,
+        channel => chromium.launchPersistentContext(config.userDataDir!, {
+          headless: !effectiveHeaded,
+          ...(channel ? { channel } : {}),
+        }),
+      ));
 
       // Open the target URL and pause for sign-in before measuring, so
       // authenticated routes are reachable on the runs that follow.
@@ -87,15 +127,21 @@ export class PlaywrightSimulator {
         await setupPage.close().catch(() => {});
       }
     } else {
-      browser = await chromium.launch({ headless: !config.headed, ...channelOpt });
+      ({ result: browser, channelUsed } = await launchWithFallback(
+        config.browserChannel,
+        channel => chromium.launch({
+          headless: !config.headed,
+          ...(channel ? { channel } : {}),
+        }),
+      ));
     }
 
     // Announce which browser actually ran so users can confirm they're on the
     // local/system browser vs the bundled Chromium. Uses the [VitalSage] prefix
     // (not [VitalSage Simulator]) so it survives the trace/capture log filters.
     const activeBrowser = persistentCtx?.browser() ?? browser;
-    const engineLabel   = config.browserChannel
-      ? `system browser '${config.browserChannel}'`
+    const engineLabel   = channelUsed
+      ? `system browser '${channelUsed}'`
       : 'bundled Chromium';
     console.log(
       `[VitalSage] Browser: ${engineLabel} v${activeBrowser?.version() ?? 'unknown'}` +

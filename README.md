@@ -33,7 +33,7 @@ Up and running in a few minutes. Pick a path once the setup steps are done.
 
 ### Prerequisites
 
-- **Node.js ≥ 18** (developed on 22)
+- **Node.js 20–22** (LTS; other versions are known to break the build — check with `node -v`, switch with [nvm](https://github.com/nvm-sh/nvm): `nvm use 22`)
 - **pnpm ≥ 9** — install with `npm install -g pnpm`
 
 ### 1. Install & build
@@ -45,13 +45,20 @@ pnpm install
 pnpm build
 ```
 
-### 2. Download the browser binary
+### 2. Pick a browser for audits
 
-`pnpm install` above already added the Playwright **package** (it's a dependency of the CLI and simulator). This step downloads the actual Chromium **browser** that the `simulate`, `trace`, `capture`, and `fix` commands drive:
+The `simulate`, `trace`, `capture`, and `fix` commands drive a Chromium-family browser. You have two options — **if you already have Chrome or Edge installed, there is nothing to do here**:
+
+**Option A — use your installed Chrome/Edge (recommended, no download).**
+When the bundled browser isn't installed, VitalSage automatically falls back to your system Chrome (then Edge) — or pin it explicitly with `--browser-channel chrome`. This also works on older machines whose OS can't run the newest bundled Chromium.
+
+**Option B — download the bundled Chromium (~150 MB, reproducible across machines):**
 
 ```bash
 pnpm exec playwright install chromium
 ```
+
+(The Playwright *driver package* is already installed by `pnpm install` — this only downloads the browser binary.)
 
 That's the whole setup. Now choose a path.
 
@@ -68,10 +75,17 @@ node agent/cli/dist/index.cjs trace \
 
 Open `report.html` in a browser. No server and no API key required — the rule-based agents produce findings on their own. Add AI-generated suggestions with `--ai-provider` and `--ai-key` (see below).
 
-> **Tip:** link the CLI globally so you can just type `vitalsage`:
+> **Tip:** to just type `vitalsage`, add a shell alias (most reliable — works with every pnpm/npm version):
 > ```bash
-> cd agent/cli && pnpm link --global && cd -
+> echo "alias vitalsage='node $(pwd)/agent/cli/dist/index.cjs'" >> ~/.zshrc && source ~/.zshrc
 > vitalsage trace --url https://example.com --output report.html
+> ```
+> Or link it globally — the command depends on your pnpm version:
+> ```bash
+> cd agent/cli
+> pnpm link            # pnpm 10+  (pnpm 9: pnpm link --global)
+> # or, with any pnpm/npm version:
+> npm link
 > ```
 
 ### Path B — Run the full demo stack (SDK → server → app)
@@ -117,7 +131,9 @@ New to the project? The [Quick Start](#quick-start) and the per-package sections
 
 ## Old machines & pages behind login
 
-The `simulate` / `trace` / `capture` / `fix` commands drive a browser to capture the CDP flame-graph trace — the core of the analysis. By default that's Playwright's **bundled Chromium**, which needs a fairly recent OS. On older machines, or to trace pages that require **authentication**, point VitalSage at the user's **own local Chrome** instead. Tracing is unaffected — the trace comes from the Chrome DevTools Protocol, which every Chromium build speaks.
+The `simulate` / `trace` / `capture` / `fix` commands drive a browser to capture the CDP flame-graph trace — the core of the analysis. By default that's Playwright's **bundled Chromium**, which needs a fairly recent OS. On older machines, or to trace pages that require **authentication**, VitalSage uses the user's **own local Chrome** instead. Tracing is unaffected — the trace comes from the Chrome DevTools Protocol, which every Chromium build speaks.
+
+> If the bundled Chromium was never downloaded, VitalSage **automatically falls back** to the system Chrome (then Edge) and says so in the launch log — no `playwright install` required. The flags below let you pin the behavior explicitly.
 
 Three flags (each also an env var) cover it, on every browser-driving command:
 
@@ -235,9 +251,9 @@ pnpm install
 # 2. Build all packages
 pnpm build
 
-# 3. Download the Chromium browser Playwright drives.
-#    The Playwright package itself was installed by `pnpm install` above;
-#    this only fetches the browser binary. Required for the CLI (simulate / trace / capture / fix).
+# 3. (Optional) Download the bundled Chromium for the CLI commands.
+#    Skip this if you have Chrome/Edge installed — VitalSage falls back to
+#    your system browser automatically (or pin it: --browser-channel chrome).
 pnpm exec playwright install chromium
 
 # 4. Start the collection server
@@ -639,12 +655,20 @@ Install and link globally:
 pnpm setup
 source ~/.zshrc   # or open a new terminal
 
-# Link the CLI
+# Link the CLI (build first: pnpm build — the bin points at dist/)
 cd agent/cli
-pnpm link --global
+pnpm link            # pnpm 10+
+# pnpm 9:            pnpm link --global
+# any pnpm/npm:      npm link
 
 # Verify
 vitalsage --help
+```
+
+If linking gives you trouble, skip it — a shell alias is equivalent and version-proof:
+
+```bash
+alias vitalsage="node /path/to/vitalsage/agent/cli/dist/index.cjs"
 ```
 
 ### simulate
@@ -1345,9 +1369,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 ### Prerequisites
 
-- Node.js ≥ 18
+- Node.js 20–22 (LTS)
 - pnpm ≥ 9
-- Playwright browsers: `pnpm exec playwright install chromium`
+- A browser for audits: either the bundled one (`pnpm exec playwright install chromium`) or a system-installed Chrome/Edge (used automatically when the bundled browser is absent, or explicitly via `--browser-channel chrome`)
 
 ### Workspace commands
 
