@@ -160,10 +160,16 @@ describe('parseAIResponse', () => {
     expect(results[0]!.learnMore).toBeUndefined();
   });
 
-  it('clamps confidence below 0 to 0', () => {
+  it('drops suggestions below the 0.3 confidence floor', () => {
     const xml = wrap(suggestion({ ...VALID_FIELDS, confidence: '-0.5' }));
     const results = parseAIResponse(xml, AGENT, METRIC);
-    expect(results[0]!.confidence).toBe(0);
+    expect(results).toHaveLength(0);
+  });
+
+  it('keeps suggestions at or above the 0.3 confidence floor', () => {
+    const xml = wrap(suggestion({ ...VALID_FIELDS, confidence: '0.3' }));
+    const results = parseAIResponse(xml, AGENT, METRIC);
+    expect(results[0]!.confidence).toBe(0.3);
   });
 
   it('clamps confidence above 1 to 1', () => {

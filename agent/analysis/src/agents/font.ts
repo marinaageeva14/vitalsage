@@ -26,10 +26,12 @@ export class FontAgent extends BaseAgent {
         title:  `${unpreloadedFonts.length} web font(s) not preloaded — browser discovers them late`,
         detail: `Found ${unpreloadedFonts.length} web font(s) without <link rel="preload">. The browser ` +
                 `only discovers fonts when parsing CSS, adding a full render-blocking delay before text can ` +
-                `be displayed. P75 FCP is ${this.formatMs(fcp.p75)}.`,
+                `be displayed. P75 FCP is ${this.formatMs(fcp.p75)}. Affected font(s): ` +
+                `${unpreloadedFonts.slice(0, 5).map(f => f.family ?? f.url).join(', ')}` +
+                (unpreloadedFonts.length > 5 ? ` and ${unpreloadedFonts.length - 5} more.` : '.'),
         effort: 'low', estimatedImpact: '~100–300ms FCP improvement', confidence: 0.84,
         codeExample: {
-          before:   `<!-- Font discovered when CSS is parsed -->`,
+          before:   `<!-- ${unpreloadedFonts[0]!.url} is discovered only when CSS is parsed -->`,
           after:    `<link rel="preload" as="font" href="${unpreloadedFonts[0]!.url}" type="font/woff2" crossorigin>`,
           language: 'html',
         },
@@ -45,11 +47,13 @@ export class FontAgent extends BaseAgent {
         title:  `${missingCrossorigin.length} preloaded font(s) missing crossorigin — preload is ignored`,
         detail: `Font preloads without crossorigin="anonymous" are silently ignored by the browser because ` +
                 `fonts always use CORS. This means the preload hint does nothing and the font is still ` +
-                `discovered late. This is a common misconfiguration.`,
+                `discovered late. This is a common misconfiguration. Affected font(s): ` +
+                `${missingCrossorigin.slice(0, 5).map(f => f.family ?? f.url).join(', ')}` +
+                (missingCrossorigin.length > 5 ? ` and ${missingCrossorigin.length - 5} more.` : '.'),
         effort: 'low', estimatedImpact: 'Activates existing preload hints', confidence: 0.97,
         codeExample: {
-          before:   `<link rel="preload" as="font" href="/font.woff2">`,
-          after:    `<link rel="preload" as="font" href="/font.woff2" crossorigin>`,
+          before:   `<link rel="preload" as="font" href="${missingCrossorigin[0]!.url}">`,
+          after:    `<link rel="preload" as="font" href="${missingCrossorigin[0]!.url}" crossorigin>`,
           language: 'html',
         },
         learnMore: 'https://web.dev/articles/preload-critical-assets#fonts',
@@ -61,18 +65,22 @@ export class FontAgent extends BaseAgent {
       s.page.fonts.some(f => !f.isSystemFont && (f.display === 'auto' || f.display === 'block'))
     );
     if (badDisplayPct > 0.4) {
-      const metric = cls?.rating === 'poor' || cls?.rating === 'needs-improvement' ? 'CLS' : 'FCP';
+      const metric     = cls?.rating === 'poor' || cls?.rating === 'needs-improvement' ? 'CLS' : 'FCP';
+      const badFont    = page.fonts.find(f => !f.isSystemFont && (f.display === 'auto' || f.display === 'block'));
+      const fontFamily = badFont?.family ?? 'MyFont';
+      const fontUrl    = badFont?.url    ?? '/font.woff2';
       suggestions.push(this.buildSuggestion({
         metric: metric as MetricName, severity: 'warning',
         title:  `${this.formatPercent(badDisplayPct)} of sessions have fonts without font-display:swap`,
         detail: `Fonts using font-display:auto or block hide text until the font loads (FOIT), ` +
                 `then cause a relayout when the font becomes available — a direct CLS source. ` +
-                `Use font-display:swap for body text or font-display:optional for decorative fonts.`,
+                `Use font-display:swap for body text or font-display:optional for decorative fonts.` +
+                (badFont ? ` Affected font: ${fontFamily}.` : ''),
         effort: 'low', estimatedImpact: 'Reduces FOIT and CLS from font loading', confidence: 0.82,
         affectedPercent: badDisplayPct,
         codeExample: {
-          before:   `@font-face { font-family: "MyFont"; src: url("/font.woff2"); }`,
-          after:    `@font-face { font-family: "MyFont"; src: url("/font.woff2"); font-display: swap; }`,
+          before:   `@font-face { font-family: "${fontFamily}"; src: url("${fontUrl}"); }`,
+          after:    `@font-face { font-family: "${fontFamily}"; src: url("${fontUrl}"); font-display: swap; }`,
           language: 'css',
         },
         learnMore: 'https://web.dev/articles/font-display',

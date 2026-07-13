@@ -330,10 +330,15 @@ export async function runTrace(args: TraceArgs): Promise<void> {
 
   const engine = new AnalysisEngine({ ...(aiConfig ? { ai: aiConfig } : {}) });
 
-  // Analyze each run independently
+  // Analyze each run independently — rules only. AI suggestions are worded
+  // differently on every call, so the cross-run consistency filter would
+  // discard them anyway; running AI here would burn runs×agents LLM calls
+  // (and the provider's rate limit) for output that never survives. AI runs
+  // once, on the pooled analysis below.
+  const ruleEngine = new AnalysisEngine({});
   const perRunSuggestions: Suggestion[][] = [];
   for (let i = 0; i < sessions.length; i++) {
-    const runReports = await engine.analyze([sessions[i]!], { minSamples: 1 });
+    const runReports = await ruleEngine.analyze([sessions[i]!], { minSamples: 1 });
     perRunSuggestions.push(runReports[0]?.suggestions ?? []);
   }
 
@@ -386,6 +391,44 @@ export async function runTrace(args: TraceArgs): Promise<void> {
   // ── Single pooled analysis for the HTML report (richer context) ─────
   const allReports = await engine.analyze(sessions, { minSamples: 1 });
   const reportData = allReports.length > 0 ? allReports : [];
+
+  // Surface the AI enhancement outcome — a failing AI layer must not be
+  // indistinguishable from "AI found nothing" in the terminal.
+  const aiT = reportData[0]?.ai;
+  if (aiT) {
+    console.log('');
+    if (aiT.failed === 0 && aiT.timedOut === 0) {
+      printInfo(`AI enhancement (${aiT.provider}): ${aiT.succeeded}/${aiT.calls} calls succeeded · ${aiT.tokensUsed} tokens · ${(aiT.durationMs / 1000).toFixed(1)}s`);
+    } else {
+      printError(`AI enhancement (${aiT.provider}): ${aiT.failed}/${aiT.calls} calls failed${aiT.timedOut ? ` (${aiT.timedOut} timed out)` : ''} — report may be missing AI suggestions`);
+      for (const e of aiT.errors ?? []) printError(`  ${e}`);
+    }
+  }
+
+  // Print pooled-analysis suggestions the per-run consistency pass didn't
+  // already show — this is where the AI suggestions land, since AI runs only
+  // on the pooled data. Without this, AI findings exist solely in the HTML.
+  const shownTitles = new Set(consistent.map(e => e.suggestion.title.toLowerCase().slice(0, 40)));
+  const pooledExtra = (reportData[0]?.suggestions ?? []).filter(
+    s => !shownTitles.has(s.title.toLowerCase().slice(0, 40))
+  );
+  if (pooledExtra.length > 0) {
+    console.log('');
+    console.log(color('━'.repeat(50), DIM));
+    console.log(`  ${color('Pooled-analysis suggestions', BOLD)}  ${color('(incl. AI — full detail in the report)', DIM)}`);
+    console.log(color('━'.repeat(50), DIM));
+    for (const s of pooledExtra) {
+      const sc = s.severity === 'critical' ? RED : s.severity === 'warning' ? YELLOW : CYAN;
+      console.log('');
+      console.log(`  ${color(`[${s.severity.toUpperCase()}]`, sc)} ${color(s.title, BOLD)}`);
+      console.log(`  ${color(s.detail, DIM)}`);
+      if (s.estimatedImpact) console.log(`  ${color('Impact: ' + s.estimatedImpact, CYAN)}`);
+      if (s.codeExample) {
+        console.log(`  ${color('Before:', DIM)} ${s.codeExample.before.split('\n')[0]}${s.codeExample.before.includes('\n') ? ' …' : ''}`);
+        console.log(`  ${color('After: ', DIM)} ${s.codeExample.after.split('\n')[0]}${s.codeExample.after.includes('\n') ? ' …' : ''}`);
+      }
+    }
+  }
 
   const datestamp = new Date().toISOString().slice(0, 10);
   const outPath   = args.output ?? `report-${datestamp}.html`;

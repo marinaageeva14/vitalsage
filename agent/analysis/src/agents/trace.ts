@@ -30,13 +30,22 @@ export class TraceAgent extends BaseAgent {
   readonly relevantMetrics: MetricName[] = ['LCP', 'INP', 'FCP'];
 
   analyze(ctx: AgentContext): RuleBasedResult {
-    const tm = ctx.representativePage.traceMetrics;
+    const page = ctx.representativePage;
+    const tm = page.traceMetrics;
     if (!tm) return { suggestions: [], skipped: true, skipReason: 'No trace metrics — run with --capture-trace' };
 
     const suggestions = [];
     const lcp = ctx.distributions.LCP;
     const inp = ctx.distributions.INP;
     const fcp = ctx.distributions.FCP;
+
+    // Shared attribution strings — the measured scripts/functions most likely
+    // responsible for main-thread cost, used to make several rules concrete.
+    const topScript   = tm.topScripts?.[0];
+    const topFn       = tm.topFunctions?.[0];
+    const scriptsLine = tm.topScripts?.length
+      ? tm.topScripts.slice(0, 3).map(s => `${s.url || '(inline)'} (${Math.round(s.time)}ms)`).join(', ')
+      : '';
 
     // Rule 1: High Total Blocking Time
     if (tm.totalBlockingTime >= TBT_WARNING) {
@@ -48,8 +57,18 @@ export class TraceAgent extends BaseAgent {
         detail: `${Math.round(tm.totalBlockingTime)}ms of main-thread work exceeds the 50ms task threshold ` +
                 `across ${tm.longTaskCount} long task(s). The browser cannot respond to user input during these tasks, ` +
                 `directly impacting INP and perceived responsiveness. ` +
-                (tm.longTasks[0] ? `Longest task: ${Math.round(tm.longTasks[0].duration)}ms at ${Math.round(tm.longTasks[0].startTime)}ms.` : ''),
+                (tm.longTasks[0] ? `Longest task: ${Math.round(tm.longTasks[0].duration)}ms at ${Math.round(tm.longTasks[0].startTime)}ms. ` : '') +
+                (scriptsLine ? `Scripts responsible for main-thread execution: ${scriptsLine}. ` : '') +
+                (topFn ? `Hottest function: ${topFn.functionName || '(anonymous)'} in ${topFn.url}:${topFn.lineNumber} (${topFn.selfTime}ms self time). ` : '') +
+                `Break these into <50ms chunks with scheduler.yield()/setTimeout, or move the work off the main thread.`,
         effort: 'medium', estimatedImpact: `~${Math.round(tm.totalBlockingTime * 0.6)}ms TBT reduction`, confidence: 0.88,
+        ...(topScript?.url ? {
+          codeExample: {
+            before:   `<script src="${topScript.url}"></script> <!-- ${Math.round(topScript.time)}ms main-thread execution -->`,
+            after:    `<script src="${topScript.url}" defer></script>\n<!-- or split it: -->\n<script>if (needed) import('${topScript.url}');</script>`,
+            language: 'html' as const,
+          },
+        } : {}),
         learnMore: 'https://web.dev/articles/optimize-long-tasks',
       }));
     }
@@ -92,7 +111,13 @@ export class TraceAgent extends BaseAgent {
         title:  `${tm.layoutCount} forced layout(s) detected — likely layout thrashing`,
         detail: `The browser performed ${tm.layoutCount} layout calculations during page load. ` +
                 `Forced synchronous layouts (reading layout properties after DOM mutations) cause ` +
-                `"layout thrashing" — each read forces a full recalculation. Batch DOM reads before writes.`,
+                `"layout thrashing" — each read forces a full recalculation. Batch DOM reads before writes. ` +
+                (scriptsLine
+                  ? `The scripts doing the main-thread work — and therefore the most likely writers: ${scriptsLine}. `
+                  : '') +
+                (topFn
+                  ? `Start the search at ${topFn.functionName || '(anonymous)'} in ${topFn.url}:${topFn.lineNumber} — it holds the most CPU time (${topFn.selfTime}ms).`
+                  : ''),
         effort: 'medium', estimatedImpact: 'Reduces main thread work and CLS', confidence: 0.79,
         learnMore: 'https://web.dev/articles/avoid-large-complex-layouts-and-layout-thrashing',
       }));
@@ -100,13 +125,29 @@ export class TraceAgent extends BaseAgent {
 
     // Rule 4: Excessive style recalculations
     if (tm.styleRecalcCount >= RECALC_WARNING) {
+      const blockingSheets = page.stylesheets
+        .filter(s => s.isRenderBlocking && s.href)
+        .sort((a, b) => (b.transferSize ?? 0) - (a.transferSize ?? 0));
+      const sheetsLine = blockingSheets.slice(0, 3)
+        .map(s => `${s.href}${s.transferSize ? ` (${Math.round(s.transferSize / 1024)}KB)` : ''}`)
+        .join(', ');
+      const biggest = blockingSheets[0];
       suggestions.push(this.buildSuggestion({
         metric: 'FCP', severity: 'warning',
         title:  `${tm.styleRecalcCount} style recalculations — complex CSS selector specificity`,
-        detail: `${tm.styleRecalcCount} style recalculations indicates high CSS complexity. ` +
-                `Overly specific selectors (e.g. div > ul > li > a) force the browser to recalculate ` +
-                `styles frequently. Flatten your CSS and use BEM or utility classes to reduce recalc overhead.`,
+        detail: `${tm.styleRecalcCount} style recalculations indicates high CSS complexity across a ` +
+                `${tm.domNodes.toLocaleString()}-node DOM — each recalc has to match selectors against the whole tree. ` +
+                (sheetsLine ? `The stylesheets to audit, largest first: ${sheetsLine}. ` : '') +
+                `Record a DevTools Performance profile and open "Recalculate Style" events to see which ` +
+                `selectors are slow; flatten those instead of rewriting all CSS.`,
         effort: 'medium', estimatedImpact: 'Reduces rendering time', confidence: 0.71,
+        ...(biggest?.href ? {
+          codeExample: {
+            before:   `<link rel="stylesheet" href="${biggest.href}">${biggest.transferSize ? ` <!-- ${Math.round(biggest.transferSize / 1024)}KB, render-blocking -->` : ''}`,
+            after:    `<style>/* critical above-fold rules extracted from ${biggest.href.split('/').pop()} */</style>\n<link rel="stylesheet" href="${biggest.href}" media="print" onload="this.media='all'">`,
+            language: 'html' as const,
+          },
+        } : {}),
         learnMore: 'https://web.dev/articles/reduce-the-scope-and-complexity-of-style-calculations',
       }));
     }
@@ -182,13 +223,30 @@ export class TraceAgent extends BaseAgent {
     // flags critical at 1500. Large DOMs also inflate JS heap (detached DOM nodes).
     if (tm.domNodes >= DOM_NODES_WARNING) {
       const severity = tm.domNodes >= DOM_NODES_CRITICAL ? 'critical' : 'warning';
+      const ds       = page.domStats;
+      const widest   = ds?.widestElements?.[0];
+      const hotspots = ds?.widestElements?.length
+        ? `The widest elements — the virtualisation candidates: ${ds.widestElements.slice(0, 3).map(w => `${w.selector} (${w.childCount} direct children)`).join(', ')}. `
+        : '';
+      const depth    = ds?.deepestElement
+        ? `Deepest nesting: ${ds.maxDepth} levels at ${ds.deepestElement}. `
+        : '';
       suggestions.push(this.buildSuggestion({
         metric: 'CLS', severity,
         title:  `DOM has ${tm.domNodes.toLocaleString()} nodes — exceeds the ${DOM_NODES_CRITICAL} recommended limit`,
         detail: `A DOM of ${tm.domNodes.toLocaleString()} nodes makes every layout recalculation and style update slower. ` +
                 `Each forced layout (of which there are ${tm.layoutCount}) must traverse the entire tree. ` +
-                `Remove off-screen/hidden elements, virtualise long lists, and defer rendering of below-the-fold content.`,
+                hotspots + depth +
+                `Virtualise the wide lists (render only visible rows), remove off-screen/hidden elements, ` +
+                `and defer rendering of below-the-fold content.`,
         effort: 'medium', estimatedImpact: 'Reduces layout and style recalc time proportionally', confidence: 0.80,
+        ...(widest ? {
+          codeExample: {
+            before:   `<!-- ${widest.selector} renders all ${widest.childCount} children at once -->\n<${widest.selector.split(/[#.]/)[0]}> …${widest.childCount} children… </${widest.selector.split(/[#.]/)[0]}>`,
+            after:    `<!-- render only the visible window (react-window, virtua, content-visibility) -->\n<${widest.selector.split(/[#.]/)[0]} style="content-visibility: auto; contain-intrinsic-size: auto 500px"> …visible rows only… </${widest.selector.split(/[#.]/)[0]}>`,
+            language: 'html' as const,
+          },
+        } : {}),
         learnMore: 'https://developer.chrome.com/docs/lighthouse/performance/dom-size',
       }));
     }
@@ -198,14 +256,33 @@ export class TraceAgent extends BaseAgent {
     // without corresponding removeEventListener on teardown — a memory leak pattern
     // that accumulates across SPA navigations and causes GC jank.
     if (tm.jsListeners >= LISTENERS_WARNING) {
+      const ls = page.listenerStats;
+      const byType = ls?.byType?.length
+        ? `Measured breakdown by event type: ${ls.byType.slice(0, 5).map(t => `${t.type}: ${t.count}`).join(', ')}. `
+        : '';
+      const byTarget = ls?.topTargets?.length
+        ? `Elements holding the most listeners: ${ls.topTargets.slice(0, 3).map(t => `${t.target} (${t.count})`).join(', ')}. `
+        : '';
+      const topType   = ls?.byType?.[0];
+      const topTarget = ls?.topTargets?.[0];
       suggestions.push(this.buildSuggestion({
         metric: 'INP', severity: 'warning',
         title:  `${tm.jsListeners} active JS event listeners — possible listener leak`,
         detail: `${tm.jsListeners} registered event listeners is unusually high for a single page. ` +
+                byType + byTarget +
                 `Listeners added in React useEffect or component mount without cleanup accumulate across ` +
-                `navigation. Each listener also retains its closure scope in memory, contributing to heap growth. ` +
-                `Audit with Chrome DevTools → Memory → Event Listeners panel.`,
+                `navigation, and each retains its closure scope in memory. ` +
+                (topType && topTarget
+                  ? `Replace the per-element '${topType.type}' handlers with one delegated listener on a stable ancestor.`
+                  : `Audit with Chrome DevTools → Memory → Event Listeners panel.`),
         effort: 'medium', estimatedImpact: 'Reduces memory pressure and GC pauses', confidence: 0.72,
+        ...(topType && topTarget ? {
+          codeExample: {
+            before:   `// ${topType.count} separate '${topType.type}' listeners (most on ${topTarget.target})\nitems.forEach(el => el.addEventListener('${topType.type}', onEvent));`,
+            after:    `// one delegated listener replaces them\ndocument.querySelector('${topTarget.target.replace(/^(window|document)$/, 'body')}').addEventListener('${topType.type}', e => {\n  const item = e.target.closest('[data-item]');\n  if (item) onEvent(e, item);\n});`,
+            language: 'javascript' as const,
+          },
+        } : {}),
         learnMore: 'https://web.dev/articles/memory-problems',
       }));
     }
@@ -222,12 +299,17 @@ export class TraceAgent extends BaseAgent {
       tm.scriptingTime / mainWork < SCRIPTING_LOW_RATIO
     ) {
       const renderPct = Math.round((tm.renderingTime / mainWork) * 100);
+      const biggestSheet = page.stylesheets
+        .filter(s => s.isRenderBlocking && s.href)
+        .sort((a, b) => (b.transferSize ?? 0) - (a.transferSize ?? 0))[0];
       suggestions.push(this.buildSuggestion({
         metric: 'CLS', severity: 'warning',
         title:  `Rendering is ${renderPct}% of main-thread work — CSS/layout is the bottleneck, not JavaScript`,
         detail: `Style recalc (${Math.round(tm.renderingTime)}ms) dominates the main thread while scripting is only ` +
                 `${Math.round(tm.scriptingTime)}ms. This pattern means CSS complexity is the primary performance cost, ` +
-                `not bundle size. Use transform/opacity for animations (compositor-threaded), flatten CSS selectors, ` +
+                `not bundle size. ` +
+                (biggestSheet?.href ? `Start with the largest stylesheet: ${biggestSheet.href}${biggestSheet.transferSize ? ` (${Math.round(biggestSheet.transferSize / 1024)}KB)` : ''}. ` : '') +
+                `Use transform/opacity for animations (compositor-threaded), flatten CSS selectors, ` +
                 `and add will-change: transform to elements that animate to promote them to their own compositor layer.`,
         effort: 'medium', estimatedImpact: 'Moves rendering off the main thread', confidence: 0.77,
         learnMore: 'https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count',

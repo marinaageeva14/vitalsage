@@ -123,5 +123,39 @@ export const INJECTOR_SCRIPT = `
       }
     }).observe({ type:'longtask', buffered:true });
   } catch(e) {}
+
+  // Event-listener census. Runs before any page script (addInitScript), so
+  // every addEventListener/removeEventListener call is counted. This turns
+  // "1,680 listeners — possible leak" into "640 scroll listeners on DIV.post"
+  // — the concrete target the report needs.
+  try {
+    var listenerCensus = { total: 0, byType: {}, byTarget: new Map() };
+    window.__vitalsage_session.listenerCensus = listenerCensus;
+
+    var origAdd    = EventTarget.prototype.addEventListener;
+    var origRemove = EventTarget.prototype.removeEventListener;
+
+    EventTarget.prototype.addEventListener = function(type, listener, opts) {
+      try {
+        listenerCensus.total++;
+        listenerCensus.byType[type] = (listenerCensus.byType[type] || 0) + 1;
+        var key = this === window ? 'window' : this === document ? 'document' : describeNode(this);
+        listenerCensus.byTarget.set(key, (listenerCensus.byTarget.get(key) || 0) + 1);
+      } catch(e) {}
+      return origAdd.call(this, type, listener, opts);
+    };
+    EventTarget.prototype.removeEventListener = function(type, listener, opts) {
+      try {
+        if (listenerCensus.byType[type] > 0) {
+          listenerCensus.total--;
+          listenerCensus.byType[type]--;
+          var key = this === window ? 'window' : this === document ? 'document' : describeNode(this);
+          var cur = listenerCensus.byTarget.get(key);
+          if (cur > 0) listenerCensus.byTarget.set(key, cur - 1);
+        }
+      } catch(e) {}
+      return origRemove.call(this, type, listener, opts);
+    };
+  } catch(e) {}
 })();
 `;

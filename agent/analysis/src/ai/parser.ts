@@ -74,7 +74,8 @@ export function parseAIResponse(
       const affectedPercent = isFinite(rawAff)  ? rawAff : undefined;
 
       const codeExample =
-        before && after && lang && VALID_LANGS.has(lang)
+        before && after && lang && VALID_LANGS.has(lang) &&
+        isSubstantiveCode(before) && isSubstantiveCode(after)
           ? { before, after, language: lang as 'html' | 'javascript' | 'css' | 'http' | 'bash' }
           : undefined;
 
@@ -98,7 +99,10 @@ export function parseAIResponse(
     .filter((s): s is Suggestion => s !== null)
     .slice(0, 5);
 
-  return groundAgainst ? validateGrounding(parsed, groundAgainst).kept : parsed;
+  // Below 30% self-reported confidence a suggestion is speculation — models
+  // emit "this may not apply, but…" filler at 0.1-0.2 instead of abstaining.
+  const confident = parsed.filter(s => s.confidence >= 0.3);
+  return groundAgainst ? validateGrounding(confident, groundAgainst).kept : confident;
 }
 
 /**
@@ -155,7 +159,8 @@ export function parseAISuggestions(
       const affectedPercent = isFinite(rawAff)  ? rawAff : undefined;
 
       const codeExample =
-        before && after && lang && VALID_LANGS.has(lang)
+        before && after && lang && VALID_LANGS.has(lang) &&
+        isSubstantiveCode(before) && isSubstantiveCode(after)
           ? { before, after, language: lang as 'html' | 'javascript' | 'css' | 'http' | 'bash' }
           : undefined;
 
@@ -179,7 +184,26 @@ export function parseAISuggestions(
     .filter((s): s is Suggestion => s !== null)
     .slice(0, 6);
 
-  return groundAgainst ? validateGrounding(parsed, groundAgainst).kept : parsed;
+  // Below 30% self-reported confidence a suggestion is speculation — models
+  // emit "this may not apply, but…" filler at 0.1-0.2 instead of abstaining.
+  const confident = parsed.filter(s => s.confidence >= 0.3);
+  return groundAgainst ? validateGrounding(confident, groundAgainst).kept : confident;
+}
+
+/**
+ * True when a code snippet contains real code — not just comments/placeholder
+ * text. Models emit filler like "original stylesheet" wrapped in comment
+ * syntax, or `<!-- no example available -->`; a suggestion is better with no
+ * example than with a placeholder one.
+ */
+function isSubstantiveCode(code: string): boolean {
+  const stripped = code
+    .replace(/<!--[\s\S]*?-->/g, '')     // HTML comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')    // block comments
+    .replace(/(^|\s)\/\/[^\n]*/g, '')    // line comments
+    .replace(/(^|\s)#[^\n]*/g, '')       // bash comments
+    .trim();
+  return stripped.length > 0;
 }
 
 function str(el: RawSuggestion, key: string): string | undefined {

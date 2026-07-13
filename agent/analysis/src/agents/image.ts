@@ -20,16 +20,18 @@ export class ImageAgent extends BaseAgent {
     const lcpEl = page.lcpElement;
     const lcpImg = page.images.find(i => i.isLCP);
     if (lcpImg?.format && ['png', 'jpeg', 'jpg'].includes(lcpImg.format.toLowerCase())) {
+      const src     = lcpImg.src || '/hero.jpg';
+      const variant = (ext: string) => src.replace(/\.(jpe?g|png)(\?.*)?$/i, `.${ext}$2`);
       suggestions.push(this.buildSuggestion({
         metric: 'LCP', severity: 'warning',
         title:  `LCP image is ${lcpImg.format.toUpperCase()} — convert to WebP/AVIF for 25–50% size reduction`,
-        detail: `The LCP image uses ${lcpImg.format.toUpperCase()} format. WebP provides 25–34% smaller files ` +
+        detail: `The LCP image (${src}) uses ${lcpImg.format.toUpperCase()} format. WebP provides 25–34% smaller files ` +
                 `than JPEG at equivalent quality; AVIF provides up to 50% reduction. ` +
                 `Serve modern formats using <picture> with fallback.`,
         effort: 'medium', estimatedImpact: '25–50% LCP image transfer reduction', confidence: 0.85,
         codeExample: {
-          before:   `<img src="/hero.jpg" fetchpriority="high">`,
-          after:    `<picture>\n  <source srcset="/hero.avif" type="image/avif">\n  <source srcset="/hero.webp" type="image/webp">\n  <img src="/hero.jpg" fetchpriority="high">\n</picture>`,
+          before:   `<img src="${src}" fetchpriority="high">`,
+          after:    `<picture>\n  <source srcset="${variant('avif')}" type="image/avif">\n  <source srcset="${variant('webp')}" type="image/webp">\n  <img src="${src}" fetchpriority="high">\n</picture>`,
           language: 'html',
         },
         learnMore: 'https://web.dev/articles/choose-the-right-image-format',
@@ -60,17 +62,23 @@ export class ImageAgent extends BaseAgent {
       s.page.images.some(img => img.isAboveFold && img.loading === 'lazy')
     );
     if (lazyAboveFoldPct > 0.2) {
+      const offenders = page.images.filter(i => i.isAboveFold && i.loading === 'lazy');
+      const example   = offenders[0]?.src || '/hero.jpg';
       suggestions.push(this.buildSuggestion({
         metric: 'LCP', severity: 'critical',
         title:  `Above-fold images with loading="lazy" delay LCP in ${this.formatPercent(lazyAboveFoldPct)} of sessions`,
         detail: `Images with loading="lazy" are not fetched until the browser determines they're in the ` +
                 `viewport — but it can only do this after layout is complete. Applying lazy loading to ` +
-                `above-fold images, especially the LCP image, directly delays the LCP metric.`,
+                `above-fold images, especially the LCP image, directly delays the LCP metric.` +
+                (offenders.length
+                  ? ` Affected image(s): ${offenders.slice(0, 5).map(i => i.src).join(', ')}` +
+                    (offenders.length > 5 ? ` and ${offenders.length - 5} more.` : '.')
+                  : ''),
         effort: 'low', estimatedImpact: 'Direct LCP improvement', confidence: 0.93,
         affectedPercent: lazyAboveFoldPct,
         codeExample: {
-          before:   `<img src="/hero.jpg" loading="lazy">`,
-          after:    `<img src="/hero.jpg" fetchpriority="high">`,
+          before:   `<img src="${example}" loading="lazy">`,
+          after:    `<img src="${example}" fetchpriority="high">`,
           language: 'html',
         },
         learnMore: 'https://web.dev/articles/browser-level-image-lazy-loading',

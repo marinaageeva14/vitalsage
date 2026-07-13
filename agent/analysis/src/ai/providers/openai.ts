@@ -17,6 +17,7 @@ export class OpenAIProvider implements AIProvider {
 
   async complete(req: AIRequest): Promise<AIResponse> {
     let attempt = 0;
+    let lastStatus: number | undefined;
     while (attempt < 3) {
       try {
         const res = await fetchWithTimeout(this.name, `${this.baseURL}/chat/completions`, {
@@ -37,6 +38,7 @@ export class OpenAIProvider implements AIProvider {
         }, this.timeoutMs);
 
         if (res.status === 429) {
+          lastStatus = 429;
           await sleep(rateLimitDelay(res, attempt));
           attempt++;
           continue;
@@ -60,6 +62,10 @@ export class OpenAIProvider implements AIProvider {
         await sleep(500 * attempt);
       }
     }
-    throw new Error('OpenAI: max retries exceeded');
+    throw new Error(
+      lastStatus === 429
+        ? 'OpenAI: rate limited (HTTP 429) on all 3 attempts — provider is throttling this key'
+        : 'OpenAI: max retries exceeded'
+    );
   }
 }

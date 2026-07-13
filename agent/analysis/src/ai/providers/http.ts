@@ -7,7 +7,11 @@
  * engine blocks until the process is killed.
  */
 
-export const DEFAULT_TIMEOUT_MS = 60_000;
+// 120s: slower "pro"-tier models (e.g. deepseek-v4-pro on NVIDIA NIM) routinely
+// exceed 60s for a full suggestions completion. The timeout exists to stop a
+// HUNG connection from stalling the audit forever, not to race the model —
+// a slow-but-succeeding call is strictly better than a guaranteed failure.
+export const DEFAULT_TIMEOUT_MS = 120_000;
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 

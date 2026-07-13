@@ -34,9 +34,39 @@ export interface PageContext {
   stylesheets:      StylesheetEntry[];
   /** Inventory of <link> resource hints present in the document. */
   hints?:           ResourceHintEntry[];
+  /** DOM shape hotspots — names the elements that make the DOM large. */
+  domStats?:        DomStats;
+  /** Live event-listener census, captured via addEventListener instrumentation. */
+  listenerStats?:   ListenerStats;
   navigationTiming: NavigationTimingSnapshot;
   traceMetrics?:    import('./trace.js').TraceMetrics;
   screenshot?:      string;  // base64 JPEG, only present on captureTrace runs
+}
+
+/**
+ * Where the DOM weight actually is — the concrete targets for "reduce DOM
+ * size" advice. Mirrors Lighthouse's DOM-size audit: the element with the
+ * most direct children is the virtualisation candidate; extreme depth points
+ * at wrapper soup.
+ */
+export interface DomStats {
+  totalNodes:  number;
+  maxDepth:    number;
+  /** Element with the deepest nesting, as a readable selector. */
+  deepestElement?: string;
+  /** Top elements by direct child count (virtualisation candidates). */
+  widestElements: Array<{ selector: string; childCount: number }>;
+}
+
+/**
+ * Event-listener census: net add/remove counts by event type plus the
+ * elements holding the most listeners. Captured by wrapping
+ * EventTarget.prototype.addEventListener before any page script runs.
+ */
+export interface ListenerStats {
+  total:      number;
+  byType:     Array<{ type: string; count: number }>;
+  topTargets: Array<{ target: string; count: number }>;
 }
 
 export interface ResourceHintEntry {

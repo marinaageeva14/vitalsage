@@ -62,17 +62,20 @@ export class LCPAgent extends BaseAgent {
     const mobileLCP  = lcp.byDevice['mobile']?.p75;
     const desktopLCP = lcp.byDevice['desktop']?.p75;
     if (mobileLCP && desktopLCP && mobileLCP > desktopLCP * 1.8) {
+      const src     = el?.src ?? '/hero.jpg';
+      const variant = (suffix: string) => src.replace(/(\.\w+)(\?.*)?$/, `${suffix}$1$2`);
       suggestions.push(this.buildSuggestion({
         metric: 'LCP', severity: 'warning',
         title:  `Mobile LCP is ${Math.round(mobileLCP / desktopLCP)}× worse than desktop — likely non-responsive image`,
         detail: `Desktop p75 LCP: ${this.formatMs(desktopLCP)}. Mobile p75 LCP: ${this.formatMs(mobileLCP)}. ` +
                 `A gap this large typically means the LCP image is not responsive — mobile devices download ` +
-                `the same large image as desktop. Add srcset with mobile-sized variants.`,
+                `the same large image as desktop. Add srcset with mobile-sized variants.` +
+                (el?.src ? ` LCP image: ${el.src}` : ''),
         effort: 'medium', estimatedImpact: `~${this.formatMs(mobileLCP - desktopLCP)} mobile LCP reduction`,
         confidence: 0.78,
         codeExample: {
-          before:   `<img src="/hero.jpg" fetchpriority="high">`,
-          after:    `<img\n  srcset="/hero-480.jpg 480w, /hero-960.jpg 960w, /hero.jpg 1440w"\n  sizes="(max-width: 768px) 100vw, 50vw"\n  src="/hero.jpg"\n  fetchpriority="high">`,
+          before:   `<img src="${src}" fetchpriority="high">`,
+          after:    `<img\n  srcset="${variant('-480')} 480w, ${variant('-960')} 960w, ${src} 1440w"\n  sizes="(max-width: 768px) 100vw, 50vw"\n  src="${src}"\n  fetchpriority="high">`,
           language: 'html',
         },
         learnMore: 'https://web.dev/articles/serve-responsive-images',

@@ -15,7 +15,7 @@ import { rankAndDeduplicate }    from './agents/orchestrator.js';
 import { resolveProvider }       from './ai/client.js';
 import { generateId }            from './utils/id.js';
 import type { BaseAgent }        from './agents/base.js';
-import type { AIClient }         from './agents/base.js';
+import type { AIClient, RuleBasedResult } from './agents/base.js';
 
 import { LCPAgent }          from './agents/lcp.js';
 import { CLSAgent }          from './agents/cls.js';
@@ -200,9 +200,18 @@ export class AnalysisEngine {
           : `Data source: real-user (RUM) sessions (${sessions.length}).`;
 
     const recorder = this.aiClient ? new RecordingAIClient(this.aiClient, this.providerName, sourceNote) : null;
-    const enhanced = await Promise.allSettled(
-      ruleResults.map(({ agent, result }) => agent.enhance(result, agentCtx, recorder))
-    );
+    // Sequential, not parallel: firing every agent's LLM call at once trips
+    // per-key concurrency/rate limits on hosted providers (observed as a 429
+    // storm → "max retries exceeded" on NVIDIA NIM). Rule-only runs resolve
+    // instantly, so sequencing costs nothing when AI is disabled.
+    const enhanced: PromiseSettledResult<RuleBasedResult>[] = [];
+    for (const { agent, result } of ruleResults) {
+      try {
+        enhanced.push({ status: 'fulfilled', value: await agent.enhance(result, agentCtx, recorder) });
+      } catch (err) {
+        enhanced.push({ status: 'rejected', reason: err });
+      }
+    }
 
     const allSuggestions: Suggestion[] = [];
     enhanced.forEach((outcome, i) => {

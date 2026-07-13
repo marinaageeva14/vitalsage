@@ -308,6 +308,55 @@ export function collectPageContext(): PageContext {
         })),
     ),
 
+    // DOM shape hotspots — which elements make the DOM big. Same shape as
+    // Lighthouse's DOM-size audit: widest elements are virtualisation
+    // candidates, extreme depth is wrapper soup.
+    domStats: (() => {
+      const describe = (el: Element): string => {
+        const cls = el.className && typeof el.className === 'string'
+          ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.')
+          : '';
+        return el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + cls;
+      };
+      const all = Array.from(document.querySelectorAll('*'));
+      let maxDepth = 0;
+      let deepest: Element | undefined;
+      const widest: Array<{ el: Element; childCount: number }> = [];
+      for (const el of all) {
+        let depth = 0;
+        for (let p = el.parentElement; p; p = p.parentElement) depth++;
+        if (depth > maxDepth) { maxDepth = depth; deepest = el; }
+        const cc = el.childElementCount;
+        if (cc >= 20) widest.push({ el, childCount: cc });
+      }
+      widest.sort((a, b) => b.childCount - a.childCount);
+      return {
+        totalNodes: all.length,
+        maxDepth,
+        ...(deepest ? { deepestElement: describe(deepest) } : {}),
+        widestElements: widest.slice(0, 5).map(w => ({ selector: describe(w.el), childCount: w.childCount })),
+      };
+    })(),
+
+    // Event-listener census recorded by the injector's addEventListener wrap.
+    ...((): { listenerStats?: import('@vitalsage/types').ListenerStats } => {
+      const census = (window as unknown as {
+        __vitalsage_session?: { listenerCensus?: { total: number; byType: Record<string, number>; byTarget: Map<string, number> } };
+      }).__vitalsage_session?.listenerCensus;
+      if (!census || census.total <= 0) return {};
+      const byType = Object.entries(census.byType)
+        .filter(([, n]) => n > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([type, count]) => ({ type, count }));
+      const topTargets = [...census.byTarget.entries()]
+        .filter(([, n]) => n > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([target, count]) => ({ target, count }));
+      return { listenerStats: { total: census.total, byType, topTargets } };
+    })(),
+
     navigationTiming: {
       redirectTime:    0, dnsTime:      0, tlsTime:         0, serverTime:  0,
       downloadTime:    0, domParseTime: 0, totalLoadTime:   0, workerTime:  0,

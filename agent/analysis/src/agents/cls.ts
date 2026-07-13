@@ -14,23 +14,32 @@ export class CLSAgent extends BaseAgent {
 
     const suggestions = [];
     const sessions = ctx.sessions;
+    const page = ctx.representativePage;
 
     // Rule 1: Unsized images (missing explicit dimensions)
     const unsizedPct = this.pctBad(sessions, s =>
       s.page.images.some(img => !img.hasExplicitDimensions && img.isAboveFold)
     );
     if (unsizedPct > 0.3) {
+      const unsized = page.images.filter(img => !img.hasExplicitDimensions && img.isAboveFold);
+      const ex      = unsized[0];
+      const exW     = ex?.displayWidth  || ex?.naturalWidth  || 1200;
+      const exH     = ex?.displayHeight || ex?.naturalHeight || 600;
       suggestions.push(this.buildSuggestion({
         metric: 'CLS', severity: cls.p75 > 0.25 ? 'critical' : 'warning',
         title:  `Above-fold images without explicit dimensions cause layout shifts in ${this.formatPercent(unsizedPct)} of sessions`,
         detail: `P75 CLS is ${cls.p75.toFixed(3)}. Images without width/height attributes cause the browser ` +
                 `to allocate no space for them initially, then re-lay out the page when they load. ` +
-                `Found in ${this.formatPercent(unsizedPct)} of sessions.`,
+                `Found in ${this.formatPercent(unsizedPct)} of sessions.` +
+                (unsized.length
+                  ? ` Affected image(s): ${unsized.slice(0, 5).map(i => i.src).join(', ')}` +
+                    (unsized.length > 5 ? ` and ${unsized.length - 5} more.` : '.')
+                  : ''),
         effort: 'low', estimatedImpact: 'Eliminates image-triggered layout shifts', confidence: 0.9,
         affectedPercent: unsizedPct,
         codeExample: {
-          before:   `<img src="/hero.jpg" alt="Hero">`,
-          after:    `<img src="/hero.jpg" alt="Hero" width="1200" height="600">`,
+          before:   `<img src="${ex?.src || '/hero.jpg'}" alt="…">`,
+          after:    `<img src="${ex?.src || '/hero.jpg'}" alt="…" width="${exW}" height="${exH}">`,
           language: 'html',
         },
         learnMore: 'https://web.dev/articles/cls',
@@ -42,16 +51,20 @@ export class CLSAgent extends BaseAgent {
       s.page.fonts.some(f => !f.isSystemFont && (f.display === 'auto' || f.display === 'block'))
     );
     if (badFontPct > 0.3) {
+      const badFont    = page.fonts.find(f => !f.isSystemFont && (f.display === 'auto' || f.display === 'block'));
+      const fontFamily = badFont?.family ?? 'MyFont';
+      const fontUrl    = badFont?.url    ?? '/font.woff2';
       suggestions.push(this.buildSuggestion({
         metric: 'CLS', severity: 'warning',
         title:  `Web fonts using font-display:auto/block cause FOUT shifts in ${this.formatPercent(badFontPct)} of sessions`,
         detail: `Fonts without font-display:swap can cause invisible text (FOIT) then a sudden text relayout ` +
-                `when the font loads — a common CLS source. P75 CLS is ${cls.p75.toFixed(3)}.`,
+                `when the font loads — a common CLS source. P75 CLS is ${cls.p75.toFixed(3)}.` +
+                (badFont ? ` Affected font: ${fontFamily}.` : ''),
         effort: 'low', estimatedImpact: '~0.05–0.15 CLS reduction', confidence: 0.82,
         affectedPercent: badFontPct,
         codeExample: {
-          before:   `@font-face { font-family: "MyFont"; src: url("/font.woff2"); }`,
-          after:    `@font-face { font-family: "MyFont"; src: url("/font.woff2"); font-display: swap; }`,
+          before:   `@font-face { font-family: "${fontFamily}"; src: url("${fontUrl}"); }`,
+          after:    `@font-face { font-family: "${fontFamily}"; src: url("${fontUrl}"); font-display: swap; }`,
           language: 'css',
         },
         learnMore: 'https://web.dev/articles/font-display',

@@ -22,6 +22,12 @@ Rules:
   Never introduce a number that does not appear in the request.
 - Do not repeat findings that are already listed in "Rule-based findings" — add new insights
 - Do not give generic advice — "optimize images" is not acceptable
+- Code examples (beforeCode/afterCode) must reference the ACTUAL elements from
+  the request data — the real src/href URLs, script names, and font families
+  listed. Never invent placeholder names like "/hero.jpg" or "styles.css".
+  If the concrete element is not in the data, omit the beforeCode/afterCode
+  elements entirely — never emit comment-only filler such as
+  "/* original stylesheet */" or "<!-- no example available -->".
 - Reference p75 values, affected session counts, and device breakdowns in your detail text
 - Severity must match the data (p75): LCP >4000ms = critical, 2500–4000ms = warning;
   INP >500ms = critical, 200–500ms = warning; CLS >0.25 = critical, 0.1–0.25 = warning;
@@ -99,6 +105,14 @@ function header(sampleSize: number, confidence: string): string {
   return `Sample size: ${sampleSize} sessions · Confidence: ${confidence}`;
 }
 
+/** Middle-truncate long URLs so element lists stay within the token budget. */
+function shortUrl(url: string, max = 140): string {
+  if (url.length <= max) return url;
+  const head = Math.ceil((max - 1) * 0.6);
+  const tail = max - 1 - head;
+  return `${url.slice(0, head)}…${url.slice(-tail)}`;
+}
+
 // ─── LCP agent ───────────────────────────────────────────────────────────────
 
 export function buildLCPPrompt(
@@ -150,7 +164,9 @@ ${page.hints?.length
 
 ## Render-blocking scripts delaying LCP
   Count: ${page.scripts.filter(s => s.isRenderBlocking).length}
+${page.scripts.filter(s => s.isRenderBlocking).slice(0, 5).map(s => `    ${s.src ? shortUrl(s.src) : '(inline)'}${s.size ? ` (${Math.round(s.size / 1024)}KB)` : ''}`).join('\n')}
   Blocking stylesheets: ${page.stylesheets.filter(s => s.isRenderBlocking).length}
+${page.stylesheets.filter(s => s.isRenderBlocking).slice(0, 5).map(s => `    ${s.href ? shortUrl(s.href) : '(inline)'}${s.transferSize ? ` (${Math.round(s.transferSize / 1024)}KB)` : ''}`).join('\n')}
 
 ## Navigation timing (averages)
   TTFB breakdown: redirect=${page.navigationTiming.redirectTime}ms dns=${page.navigationTiming.dnsTime}ms tls=${page.navigationTiming.tlsTime}ms server=${page.navigationTiming.serverTime}ms download=${page.navigationTiming.downloadTime}ms
@@ -204,7 +220,9 @@ ${sourceSection}
 ## Images (above-fold)
   Total above-fold images: ${page.images.filter(i => i.isAboveFold).length}
   Without explicit width/height: ${unsizedImages.length}
+${unsizedImages.slice(0, 8).map(i => `    ${shortUrl(i.src)}${i.displayWidth ? ` (renders at ${i.displayWidth}×${i.displayHeight}px)` : ''}`).join('\n')}
   With loading="lazy" above fold: ${page.images.filter(i => i.isAboveFold && i.loading === 'lazy').length}
+${page.images.filter(i => i.isAboveFold && i.loading === 'lazy').slice(0, 5).map(i => `    ${shortUrl(i.src)}`).join('\n')}
 
 ## Fonts
   Total web fonts: ${webFonts.length}
@@ -277,6 +295,8 @@ ${phaseSection}
 ## DOM complexity (affects event handler cost)
   DOM nodes: ${page.domNodeCount}
   First-party scripts: ${page.scripts.filter(s => !s.isThirdParty).length}
+${page.listenerStats ? `  Event listeners (measured): ${page.listenerStats.total} total — by type: ${page.listenerStats.byType.slice(0, 6).map(t => `${t.type}=${t.count}`).join(', ')}
+  Elements holding the most listeners: ${page.listenerStats.topTargets.slice(0, 3).map(t => `${t.target} (${t.count})`).join(', ')}` : ''}
 
 ## Rule-based findings already identified (do NOT repeat these)
 ${ruleList(rules)}
@@ -491,6 +511,7 @@ ${fmsDist(lcp, 'LCP')}
 ${fmsDist(fcp, 'FCP')}
 
 ## LCP Image
+  src: ${lcpImg?.src ? shortUrl(lcpImg.src) : el?.src ? shortUrl(el.src) : 'unknown'}
   Format: ${lcpImg?.format ?? 'unknown'}
   Natural size: ${el?.naturalWidth ?? '?'}×${el?.naturalHeight ?? '?'}px
   Display size: ${el?.displayWidth ?? '?'}×${el?.displayHeight ?? '?'}px
@@ -501,12 +522,15 @@ ${fmsDist(fcp, 'FCP')}
 
 ## Above-fold images (${aboveFold.length} total)
   With loading="lazy": ${lazyAboveFold.length}
+${lazyAboveFold.slice(0, 5).map(i => `    ${shortUrl(i.src)}`).join('\n')}
   Without srcset: ${noSrcset.length}
   Without explicit dimensions: ${aboveFold.filter(i => !i.hasExplicitDimensions).length}
+${aboveFold.filter(i => !i.hasExplicitDimensions).slice(0, 5).map(i => `    ${shortUrl(i.src)}`).join('\n')}
 
 ## All images
   Total: ${page.images.length}
   Below-fold without lazy: ${page.images.filter(i => !i.isAboveFold && i.loading !== 'lazy').length}
+${page.images.filter(i => !i.isAboveFold && i.loading !== 'lazy').slice(0, 8).map(i => `    ${shortUrl(i.src)}${i.transferSize ? ` (${Math.round(i.transferSize / 1024)}KB)` : ''}`).join('\n')}
 
 ## Rule-based findings already identified (do NOT repeat these)
 ${ruleList(rules)}
@@ -635,6 +659,14 @@ ${trace.topFunctions.slice(0, 10).map(f =>
 URL: ${page.url}
 DOM nodes: ${page.domNodeCount}
 Scripts: ${page.scripts.length} (${page.scripts.filter(s => s.isRenderBlocking).length} render-blocking)
+${page.domStats?.widestElements?.length ? `DOM hotspots (widest elements — virtualisation candidates):
+${page.domStats.widestElements.slice(0, 5).map(w => `  ${w.selector} — ${w.childCount} direct children`).join('\n')}
+Max nesting depth: ${page.domStats.maxDepth}${page.domStats.deepestElement ? ` at ${page.domStats.deepestElement}` : ''}` : ''}
+${page.listenerStats ? `Event listeners (measured): ${page.listenerStats.total} total
+  By type: ${page.listenerStats.byType.slice(0, 6).map(t => `${t.type}=${t.count}`).join(', ')}
+  Top targets: ${page.listenerStats.topTargets.slice(0, 3).map(t => `${t.target} (${t.count})`).join(', ')}` : ''}
+Render-blocking stylesheets:
+${page.stylesheets.filter(s => s.isRenderBlocking && s.href).slice(0, 5).map(s => `  ${s.href}${s.transferSize ? ` (${Math.round(s.transferSize / 1024)}KB)` : ''}`).join('\n') || '  (none)'}
 
 ## Your task
 You are analyzing CPU and rendering performance from a real CDP trace.
