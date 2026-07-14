@@ -10,8 +10,7 @@
   "exports": {
     ".": {
       "import": "./dist/vitalsage.js",
-      "require": "./dist/vitalsage.cjs",
-      "types": "./dist/types/index.d.ts"
+      "require": "./dist/vitalsage.cjs"
     }
   },
   "files": [
