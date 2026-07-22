@@ -262,6 +262,8 @@ export interface TraceArgs extends BrowserOpts {
   output?:      string;
   delay?:       number;
   fullReport?:  boolean;
+  cpuThrottle?: number;
+  insecure?:    boolean;
   aiProvider?:  string;
   aiKey?:       string;
   aiModel?:     string;
@@ -272,7 +274,7 @@ export async function runTrace(args: TraceArgs): Promise<void> {
   const { AnalysisEngine, generateHtmlReport } = await import('vitalsage-analysis');
 
   printInfo(`Capturing performance trace for ${color(args.url, CYAN)}`);
-  printInfo(`${args.runs} run(s) · network: ${args.network} · viewport: ${args.viewport}${args.fullReport ? ' · ' + color('full CPU profiler enabled', YELLOW) : ''}`);
+  printInfo(`${args.runs} run(s) · network: ${args.network} · viewport: ${args.viewport}${args.cpuThrottle && args.cpuThrottle > 1 ? ' · ' + color(`CPU ${args.cpuThrottle}× throttle`, YELLOW) : ''}${args.fullReport ? ' · ' + color('full CPU profiler enabled', YELLOW) : ''}`);
   if (args.fullReport) {
     printInfo(`Full report mode: recording per-function call stacks (expect larger traces and ~10–15% overhead)`);
   }
@@ -295,6 +297,8 @@ export async function runTrace(args: TraceArgs): Promise<void> {
       concurrency:        1,
       captureTrace:       true,
       captureFullTrace:   args.fullReport ?? false,
+      ...(args.cpuThrottle ? { cpuThrottle: args.cpuThrottle } : {}),
+      ...(args.insecure ? { ignoreHTTPSErrors: true } : {}),
       networks:           [args.network as NetworkProfile],
       viewports:          [args.viewport as ViewportProfile],
       waitAfterLoad:      3000,

@@ -114,6 +114,7 @@ export class PlaywrightSimulator {
         config.browserChannel,
         channel => chromium.launchPersistentContext(config.userDataDir!, {
           headless: !effectiveHeaded,
+          ...(config.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
           ...(channel ? { channel } : {}),
         }),
       ));
@@ -163,6 +164,7 @@ export class PlaywrightSimulator {
         deviceScaleFactor: vp.deviceScaleFactor,
         isMobile:          vp.isMobile,
         hasTouch:          vp.hasTouch,
+        ...(config.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
       });
       const page = await context.newPage();
       return { context, page, release: async () => { await context.close().catch(() => {}); } };
@@ -233,11 +235,14 @@ export class PlaywrightSimulator {
       await mainCdp.send('Network.enable');
       await mainCdp.send('Network.emulateNetworkConditions', NETWORK_PROFILES[run.network]);
 
-      // Mobile means a slower CPU, not just a narrow screen — without
-      // throttling, "mobile" runs measure desktop CPU behind a mobile
-      // viewport and under-detect JS/rendering bottlenecks.
-      if (vp.isMobile) {
-        await mainCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      // CPU throttling. An explicit config.cpuThrottle applies on any viewport
+      // (emulates a low-end desktop under slow-network conditions). Otherwise
+      // mobile still defaults to 4×: mobile means a slower CPU, not just a
+      // narrow screen — without it, "mobile" runs measure desktop CPU behind a
+      // mobile viewport and under-detect JS/rendering bottlenecks.
+      const cpuRate = config.cpuThrottle ?? (vp.isMobile ? 4 : 1);
+      if (cpuRate > 1) {
+        await mainCdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
       }
 
       if (config.captureTrace) {

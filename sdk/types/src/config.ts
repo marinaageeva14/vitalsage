@@ -65,6 +65,19 @@ export interface SimulatorConfig {
    * Only meaningful when captureTrace is also true.
    */
   captureFullTrace?:  boolean;
+  /**
+   * Slow the CPU by this multiplier via CDP (Emulation.setCPUThrottlingRate),
+   * e.g. 4 = 4× slower, to emulate a mid/low-end device. Applies on every
+   * viewport; mobile viewports already default to 4× when this is unset.
+   * 1 (or unset) leaves CPU un-throttled.
+   */
+  cpuThrottle?:       number;
+  /**
+   * Ignore TLS certificate errors (expired/self-signed/hostname mismatch).
+   * Lets the simulator measure a site whose cert is broken — the perf data is
+   * still valid, and the broken cert is itself a finding worth surfacing.
+   */
+  ignoreHTTPSErrors?: boolean;
   outputDir:          string;
   concurrency?:       number;
   delayBetweenRuns?:  number;  // ms to wait between batch chunks

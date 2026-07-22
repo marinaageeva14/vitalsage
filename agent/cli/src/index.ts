@@ -132,6 +132,10 @@ Options (trace):
   --runs         Number of trace runs (default: 3)
   --network      Network profile: wifi 4g 3g slow-2g (default: 4g)
   --viewport     Viewport profile: desktop tablet mobile (default: desktop)
+  --cpu-throttle CPU slowdown multiplier via CDP, e.g. 4 = 4× slower, to emulate
+                 a low-end device (applies on any viewport; mobile is 4× by default)
+  --insecure     Ignore TLS certificate errors (expired/self-signed) so a site
+                 with a broken cert can still be measured
   --delay        Ms to wait between runs (default: 2000)
   --full-report  Enable V8 CPU profiler for per-function flame chart data.
                  Same data source as Chrome DevTools Performance tab.
@@ -297,6 +301,8 @@ async function main(): Promise<void> {
       viewport: getString(args, 'viewport') ?? 'desktop',
       delay:    getNumber(args, 'delay', 2000),
       fullReport,
+      ...(args.has('cpuThrottle') ? { cpuThrottle: getNumber(args, 'cpuThrottle', 1) } : {}),
+      ...(args.get('insecure') === true || args.get('insecure') === 'true' ? { insecure: true } : {}),
       ...(aiProvider ? { aiProvider } : {}),
       ...(aiKey      ? { aiKey }      : {}),
       ...(aiModel    ? { aiModel }    : {}),
